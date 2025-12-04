@@ -1,0 +1,204 @@
+/* =========================================
+   Client Gallery – grid + layout only
+   (no lightbox rules in this file)
+   ========================================= */
+
+/* Design tokens (pull from TT5 when available) */
+.cgm-gallery-wrapper {
+    --cgm-radius: var(--wp--style--global--border-radius, 6px);
+    --cgm-gap: var(--wp--style--block-gap, 1rem);
+    --cgm-tile-bg: #111;
+
+    box-sizing: border-box;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0;
+
+    max-width: 100%;
+    overflow-x: hidden; /* hard stop any stray horizontal scroll */
+}
+
+.cgm-gallery-wrapper *,
+.cgm-gallery-wrapper *::before,
+.cgm-gallery-wrapper *::after {
+    box-sizing: border-box;
+}
+
+/* ---------------------------
+   Header
+   --------------------------- */
+
+.cgm-gallery-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.cgm-gallery-title {
+    font-size: clamp(1.5rem, 2vw, 1.9rem);
+    margin: 0;
+}
+
+.cgm-gallery-download-all {
+    margin: 0;
+}
+
+/* ---------------------------
+   Main gallery grid
+   --------------------------- */
+
+.cgm-grid {
+    display: grid;
+    width: 100%;
+    gap: var(--cgm-gap);
+    /* mobile-first: single column */
+    grid-template-columns: 1fr;
+}
+
+.cgm-grid img,
+.cgm-lightbox-image-wrap img {
+    pointer-events: none;              /* click goes to link/lightbox, not image */
+    -webkit-user-drag: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* Above ~480px: allow more columns */
+@media (min-width: 480px) {
+    .cgm-grid {
+        grid-template-columns: repeat(
+            auto-fit,
+            minmax(220px, 1fr)
+        );
+    }
+}
+
+/* Each image tile sits fully inside the grid cell */
+.cgm-item {
+    overflow: hidden;
+    border-radius: var(--cgm-radius);
+    background: #000;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Link fills the tile */
+.cgm-item a {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Image fills the tile neatly */
+.cgm-item img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;  /* crop nicely inside the box */
+    border-radius: inherit;
+}
+
+/* Hover/focus effect */
+.cgm-item:hover,
+.cgm-item:focus-within {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------------------------
+   Password form
+   --------------------------- */
+
+.cgm-gallery-password-wrap {
+    max-width: 480px;
+    margin: 4rem auto;
+    padding: 2rem 1.5rem;
+    background: var(--cgm-tile-bg);
+    border-radius: var(--cgm-radius);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.cgm-gallery-password-wrap h2 {
+    margin-top: 0;
+    margin-bottom: 0.75rem;
+}
+
+/* ---------------------------
+   Index block preview + grid
+   --------------------------- */
+
+.cgm-gallery-index-grid {
+    display: grid;
+    width: 100%;
+    gap: var(--cgm-gap);
+    margin-block: 1.5rem 0;
+    grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 480px) {
+    .cgm-gallery-index-grid {
+        grid-template-columns: repeat(
+            auto-fit,
+            minmax(var(--cgm-min-width, 220px), 1fr)
+        );
+    }
+}
+
+.cgm-gallery-index-item {
+    border-radius: var(--cgm-radius);
+    overflow: hidden;
+    background: var(--cgm-tile-bg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+
+
+.cgm-gallery-index-link {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: inherit;
+}
+
+.cgm-gallery-index-thumb-wrap {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    background: #000;
+}
+
+.cgm-gallery-index-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.cgm-gallery-index-title {
+    margin: 0;
+    padding: 0.75rem 0.75rem 0.9rem;
+    font-size: 1rem;
+}
+
+.cgm-gallery-index-item:hover,
+.cgm-gallery-index-item:focus-within {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+/* Editor placeholder styling for the block */
+.cgm-gallery-index-block-placeholder {
+    border-radius: var(--cgm-radius);
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+/* Keep gallery full-width inside constrained layouts on small screens */
+@media (max-width: 600px) {
+  .is-layout-constrained > .cgm-gallery-wrapper {
+    max-width: 100% !important;
+  }
+}

@@ -1,0 +1,195 @@
+/* ------------------------------------
+   Client Gallery Manager – LIGHTBOX
+   Overlay, nav buttons, image wrap
+   ------------------------------------ */
+
+/* When lightbox is open, prevent background scroll */
+body.cgm-lightbox-open {
+    overflow: hidden;
+}
+
+/* Full-screen dark overlay */
+.cgm-lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+
+    box-sizing: border-box;
+    padding: 1rem;
+}
+
+.cgm-lightbox-overlay.is-visible {
+    display: flex;
+}
+
+/* Inner lightbox container (mobile-first) */
+.cgm-lightbox-inner {
+    position: relative;
+
+    box-sizing: border-box;
+    width: 100%;
+    max-width: min(1000px, 95vw);
+    /* IMPORTANT: let height be driven by image + padding */
+    background: #111;
+    padding: 1rem 1rem 0.75rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+
+    display: flex;
+    flex-direction: column; /* image on top, actions below (mobile) */
+    gap: 0.75rem;
+    align-items: center;
+}
+
+/* Image area – just a centering wrapper, no height constraints */
+.cgm-lightbox-image-wrap {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* DO NOT force height; let image decide */
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+}
+
+.cgm-lightbox-image-wrap img {
+    display: block;
+    width: auto !important;
+    height: auto !important;
+
+    /* Constrain to viewport, not to parent height */
+    max-width: calc(100vw - 4rem) !important;
+    max-height: calc(100vh - 6rem) !important;
+
+    object-fit: contain !important; /* NEVER crop */
+}
+
+/* Actions bar (mobile default: under the image, centered) */
+.cgm-lightbox-actions {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+}
+
+.cgm-lightbox-actions .wp-element-button {
+    min-width: 200px;
+    max-width: 100%;
+    text-align: center;
+}
+
+/* Close button (top-right of inner box) */
+.cgm-lightbox-close {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.5rem;
+    border: none;
+    background: transparent;
+    color: #fff;
+    font-size: 1.8rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+/* Lightbox prev/next buttons (arrows) */
+.cgm-lightbox-nav {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font-size: 2.2rem;
+    width: 2.8rem;
+    height: 2.8rem;
+    border-radius: 999px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    z-index: 10000;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.cgm-lightbox-prev {
+    left: 1.25rem;
+}
+
+.cgm-lightbox-next {
+    right: 1.25rem;
+}
+
+.cgm-lightbox-nav:hover,
+.cgm-lightbox-nav:focus-visible {
+    background: rgba(0, 0, 0, 0.85);
+    transform: translateY(-50%) scale(1.05);
+    outline: none;
+}
+
+/* =========================================
+   MEDIA QUERIES (mobile-first → larger)
+   ========================================= */
+
+/* Small screens – tweak nav button size/offset */
+@media (max-width: 600px) {
+    .cgm-lightbox-nav {
+        font-size: 2rem;
+        width: 2.4rem;
+        height: 2.4rem;
+    }
+
+    .cgm-lightbox-prev {
+        left: 0.75rem;
+    }
+
+    .cgm-lightbox-next {
+        right: 0.75rem;
+    }
+}
+
+/* Desktop layout:
+   - image centered
+   - inner box wider
+   - download button top-left INSIDE dark box
+   - button does NOT affect image height
+*/
+@media (min-width: 900px) {
+
+    .cgm-lightbox-inner {
+        max-width: min(1400px, 95vw);
+        padding: 3.25rem 1.5rem 1.25rem; /* extra top padding for the button row */
+    }
+
+    .cgm-lightbox-actions {
+        position: absolute;
+        top: 0.75rem;
+        left: 1.5rem;
+        width: auto;
+        padding: 0;
+        margin: 0;
+        justify-content: flex-start;
+        align-items: center;
+    }
+
+    .cgm-lightbox-actions .wp-element-button {
+        min-width: 160px;
+        max-width: none;
+    }
+
+    .cgm-lightbox-image-wrap {
+        width: 100%;
+        margin: 0;
+    }
+
+    .cgm-lightbox-image-wrap img {
+        max-width: calc(1400px - 3rem) !important; /* inner width minus padding */
+        max-height: calc(100vh - 7rem) !important; /* viewport minus padding/button area */
+    }
+}
