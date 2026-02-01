@@ -225,12 +225,12 @@ function cgm_render_client_gallery_content( $content ) {
 
                     <!-- Download password is required, but we use a modal instead of inline form.
                          JS will open the modal when this button is clicked. -->
-                    <p class="cgm-gallery-download-all">
+                    <div class="cgm-gallery-download-all">
                         <a class="wp-element-button cgm-download-trigger"
                            href="<?php echo esc_url( cgm_download_all_url( $gallery_id ) ); ?>">
                             <?php esc_html_e( 'Download all as ZIP', 'client-gallery' ); ?>
                         </a>
-                    </p>
+                </div>
 
                 <?php endif; ?>
 
