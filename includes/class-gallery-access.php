@@ -207,6 +207,15 @@ class CGM_Gallery_Access {
     }
 
     /**
+    * SEO helper: treat password-protected galleries as "private".
+    *
+    * "Private" in CGM means: not indexable without unlocking viewing.
+    */
+    public static function gallery_is_private( $post_id ) {
+        return self::requires_view_password( (int) $post_id );
+    }
+
+    /**
      * Does this gallery require a download password?
      *
      * @param int $post_id

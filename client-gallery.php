@@ -29,6 +29,7 @@ require_once CGM_PLUGIN_PATH . 'includes/class-gallery-access.php';
 require_once CGM_PLUGIN_PATH . 'includes/class-gallery-download.php';
 require_once CGM_PLUGIN_PATH . 'includes/class-gallery-admin.php';
 require_once CGM_PLUGIN_PATH . 'includes/class-gallery-blocks.php';
+require_once CGM_PLUGIN_PATH . 'includes/class-gallery-seo.php';
 
 /**
  * Initialize components on plugin load.
@@ -38,6 +39,8 @@ function cgm_init_plugin() {
     CGM_Gallery_Access::init();
     CGM_Gallery_Download::init();
     CGM_Gallery_Blocks::init();
+    CGM_Gallery_SEO::init();
+    CGM_Gallery_Storage::init();
 }
 add_action( 'plugins_loaded', 'cgm_init_plugin' );
 
@@ -143,7 +146,7 @@ function cgm_register_gallery_cpt() {
         'exclude_from_search' => true,
         'show_in_nav_menus'   => false,
         'publicly_queryable'  => true,
-        'supports'            => [ 'title', 'thumbnail' ],
+        'supports'            => [ 'title', 'editor', 'excerpt', 'thumbnail' ],
         'rewrite'             => [ 'slug' => 'client-gallery' ],
         'has_archive'         => false,
     ];
@@ -160,7 +163,7 @@ function cgm_render_client_gallery_content( $content ) {
         return $content;
     }
 
-    // 🔒 Ensure password modal assets are definitely loaded for this view
+    // Ensure password modal assets are definitely loaded for this view
     wp_enqueue_style( 'cgm-password-modal-css' );
     wp_enqueue_script( 'cgm-password-modal-js' );
 
@@ -227,10 +230,11 @@ function cgm_render_client_gallery_content( $content ) {
                          JS will open the modal when this button is clicked. -->
                     <div class="cgm-gallery-download-all">
                         <a class="wp-element-button cgm-download-trigger"
-                           href="<?php echo esc_url( cgm_download_all_url( $gallery_id ) ); ?>">
+                        href="#"
+                        data-cgm-download-all="1">
                             <?php esc_html_e( 'Download all as ZIP', 'client-gallery' ); ?>
                         </a>
-                </div>
+                    </div>
 
                 <?php endif; ?>
 
@@ -247,6 +251,15 @@ function cgm_render_client_gallery_content( $content ) {
         </div>
 
         <?php
+        $can_download = false;
+
+        if ( class_exists( 'CGM_Gallery_Access' ) ) {
+            $can_download = CGM_Gallery_Access::user_can_download( $gallery_id );
+        }
+        ?>
+
+
+        <?php
         /**
          * 3) Render gallery grid (view access already granted at this point).
          */
@@ -257,23 +270,28 @@ function cgm_render_client_gallery_content( $content ) {
         else :
             ?>
             <div class="cgm-grid">
-                <?php foreach ( $files as $file ) : ?>
+                <?php foreach ( $files as $i => $file ) : ?>
                     <div class="cgm-item">
                         <a
-                            href="<?php echo esc_url( $file['download_url'] ); ?>"
+                            href="<?php echo esc_url( $file['thumb_url'] ); ?>"
                             class="cgm-lightbox-trigger"
                             data-thumb="<?php echo esc_url( $file['thumb_url'] ); ?>"
-                            data-download="<?php echo esc_url( $file['download_url'] ); ?>"
+                            <?php if ( $can_download ) : ?>
+                                data-download="<?php echo esc_url( $file['download_url'] ); ?>"
+                            <?php endif; ?>
                         >
                             <img
                                 src="<?php echo esc_url( $file['thumb_url'] ); ?>"
-                                alt=""
+                                alt="<?php echo esc_attr(
+                                    CGM_Gallery_SEO::build_image_alt( $gallery_id, $i + 1, $file )
+                                ); ?>"
                                 loading="lazy"
                             />
                         </a>
                     </div>
                 <?php endforeach; ?>
             </div>
+
             <?php
         endif;
         ?>
@@ -365,6 +383,21 @@ function cgm_render_client_gallery_content( $content ) {
 
     <?php
 
-    return ob_get_clean();
+    $gallery_html = ob_get_clean();
+
+    // Marker-controlled placement:
+    // Put <!-- cgm:gallery --> in a Custom HTML block to control where the gallery renders.
+    $marker = '<!-- cgm:gallery -->';
+
+    if ( strpos( $content, $marker ) !== false ) {
+        // Replace *all* markers (in case user accidentally adds two)
+        return str_replace( $marker, $gallery_html, $content );
+    }
+
+    // Fallback: append gallery after Gutenberg content.
+    return $content . $gallery_html;
+
 }
 add_filter( 'the_content', 'cgm_render_client_gallery_content' );
+
+

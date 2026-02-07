@@ -16,6 +16,121 @@ class CGM_Gallery_Storage {
     const WATERMARK_TEXT = 'Parfocal Media';
 
     /**
+     * Boot storage-layer front-end endpoints.
+     */
+    public static function init() {
+        add_action( 'template_redirect', [ __CLASS__, 'handle_thumb_request' ] );
+    }
+
+    /**
+     * Serve thumbnail images with access control.
+     *
+     * URL format:
+     *   /?cgm_thumb=1&gallery_id=123&file=image.jpg
+     */
+    public static function handle_thumb_request() {
+        if ( empty( $_GET['cgm_thumb'] ) ) {
+            return;
+        }
+
+        $gallery_id = isset( $_GET['gallery_id'] ) ? (int) $_GET['gallery_id'] : 0;
+
+        // Do NOT sanitize into a different filename; decode and basename it safely.
+        $file = isset( $_GET['file'] ) ? (string) wp_unslash( $_GET['file'] ) : '';
+        $file = rawurldecode( $file );
+        $file = wp_basename( $file ); // prevents path traversal without renaming
+
+        // Hard block traversal/control chars.
+        if ( $gallery_id <= 0 || $file === '' || strpos( $file, '..' ) !== false || strpos( $file, '/' ) !== false || strpos( $file, '\\' ) !== false || preg_match( '/[\x00-\x1F\x7F]/', $file ) ) {
+            self::output_placeholder_image( false );
+            exit;
+        }
+
+        // Access control (view permission).
+        if ( class_exists( 'CGM_Gallery_Access' ) && method_exists( 'CGM_Gallery_Access', 'user_can_view' ) ) {
+            if ( ! CGM_Gallery_Access::user_can_view( $gallery_id ) ) {
+                self::maybe_redirect_or_placeholder();
+                exit;
+            }
+        }
+
+        $paths     = self::get_gallery_paths( $gallery_id );
+        $thumbs_dir = trailingslashit( $paths['thumbs'] );
+
+        // Try exact thumb first.
+        $thumb = $thumbs_dir . $file . '.webp';
+
+        if ( ! file_exists( $thumb ) ) {
+            // Fallback: match auto-numbered thumbs (e.g. grace-harlie--97.jpg.webp).
+            $pattern = $thumbs_dir . pathinfo( $file, PATHINFO_FILENAME ) . '*.webp';
+            $matches = glob( $pattern );
+
+            if ( ! empty( $matches ) && file_exists( $matches[0] ) ) {
+                $thumb = $matches[0];
+            }
+        }
+
+        if ( ! file_exists( $thumb ) ) {
+            self::output_placeholder_image( false );
+            exit;
+        }
+
+        header( 'Content-Type: image/webp' );
+        header( 'Content-Length: ' . (string) filesize( $thumb ) );
+        header( 'Cache-Control: private, max-age=3600' );
+
+        readfile( $thumb );
+        exit;
+    }
+
+
+    /**
+     * If unauthorized: return an image placeholder for <img> requests,
+     * otherwise redirect to a friendly "private image" page.
+     */
+    protected static function maybe_redirect_or_placeholder() {
+        // If the client accepts images, it's probably an <img> tag -> return image bytes.
+        $accept = isset( $_SERVER['HTTP_ACCEPT'] ) ? (string) $_SERVER['HTTP_ACCEPT'] : '';
+        if ( $accept && strpos( $accept, 'image' ) !== false ) {
+            self::output_placeholder_image( true );
+            exit;
+        }
+
+        // Otherwise, redirect to a friendly info page (you create this page with slug 'private-image').
+        $private_page = get_page_by_path( 'private-image' );
+        if ( $private_page instanceof WP_Post ) {
+            wp_safe_redirect( get_permalink( $private_page ), 302 );
+            exit;
+        }
+
+        // Fallback: if page doesn't exist, still return placeholder (safe).
+        self::output_placeholder_image( true );
+        exit;
+    }
+
+    /**
+     * Output a placeholder image (SVG) instead of HTML.
+     */
+    protected static function output_placeholder_image( $private = false ) {
+        header( 'Content-Type: image/svg+xml; charset=utf-8' );
+        header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
+        header( 'Pragma: no-cache' );
+
+        // Critical: stop image indexing.
+        header( 'X-Robots-Tag: noimageindex, noindex, nofollow' );
+
+        $label = $private ? 'Private image' : 'Image unavailable';
+
+        // Simple SVG placeholder.
+        echo '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300" role="img" aria-label="' . esc_attr( $label ) . '">
+  <rect width="400" height="300" fill="#e5e7eb"/>
+  <text x="200" y="155" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#6b7280">' . esc_html( $label ) . '</text>
+</svg>';
+        exit;
+    }
+
+
+    /**
      * Build absolute paths for a gallery.
      *
      * Uses a manually set folder name if available, otherwise falls back to
@@ -348,14 +463,16 @@ class CGM_Gallery_Storage {
             }
 
             // Browser URLs go through admin-post endpoints.
+            // Thumbnails should NOT use admin-post (SEO + crawlers). Serve via a front-end endpoint.
             $thumb_url = add_query_arg(
                 [
-                    'action'     => 'cgm_thumb',
+                    'cgm_thumb'  => 1,
                     'gallery_id' => (int) $gallery_id,
-                    'file'       => $file,
+                    'file'       => rawurlencode( $file ),
                 ],
-                admin_url( 'admin-post.php' )
+                home_url( '/' )
             );
+
 
             $download_url = add_query_arg(
                 [
