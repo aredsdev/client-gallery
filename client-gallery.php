@@ -84,6 +84,15 @@ function cgm_register_assets() {
         '0.1.3',
         true
     );
+
+    wp_register_script(
+        'cgm-gallery-share',
+        CGM_PLUGIN_URL . 'assets/js/gallery-share.js',
+        [],
+        '0.1.3',
+        true
+    );
+
 }
 add_action( 'init', 'cgm_register_assets' );
 
@@ -100,6 +109,8 @@ function cgm_enqueue_frontend_assets() {
 
         wp_enqueue_script( 'cgm-gallery-lightbox' );
         wp_enqueue_script( 'cgm-password-modal-js' );
+        wp_enqueue_script( 'cgm-gallery-share' );
+
 
         // Pass DOWNLOAD password state into JS so it knows when to intercept clicks.
         if ( class_exists( 'CGM_Gallery_Access' ) ) {
@@ -168,6 +179,23 @@ function cgm_render_client_gallery_content( $content ) {
     wp_enqueue_script( 'cgm-password-modal-js' );
 
     $gallery_id = get_the_ID();
+    $gallery_slug = get_post_field( 'post_name', $gallery_id );
+
+    // Public = no viewing password required
+    $is_public_gallery = class_exists( 'CGM_Gallery_Access' )
+        ? ! CGM_Gallery_Access::requires_view_password( $gallery_id )
+        : true;
+
+    $cgm_share_url = add_query_arg(
+        [
+            'utm_source'   => 'social',
+            'utm_medium'   => 'share',
+            'utm_campaign' => 'gallery_share',
+            'utm_content'  => $gallery_slug,
+        ],
+        get_permalink( $gallery_id )
+    );
+
     ob_start();
     ?>
     <div class="cgm-gallery-wrapper alignwide">
@@ -210,45 +238,77 @@ function cgm_render_client_gallery_content( $content ) {
         ?>
 
         <div class="cgm-gallery-header" id="downloads">
-            <?php if ( class_exists( 'CGM_Gallery_Access' )
-                && method_exists( 'CGM_Gallery_Access', 'requires_download_password' )
-                && CGM_Gallery_Access::requires_download_password( $gallery_id ) ) : ?>
+            <div class="cgm-gallery-actions">
 
-                <?php if ( method_exists( 'CGM_Gallery_Access', 'user_can_download' )
-                    && CGM_Gallery_Access::user_can_download( $gallery_id ) ) : ?>
+                <?php if ( class_exists( 'CGM_Gallery_Access' )
+                    && method_exists( 'CGM_Gallery_Access', 'requires_download_password' )
+                    && CGM_Gallery_Access::requires_download_password( $gallery_id ) ) : ?>
+
+                    <?php if ( method_exists( 'CGM_Gallery_Access', 'user_can_download' )
+                        && CGM_Gallery_Access::user_can_download( $gallery_id ) ) : ?>
+
+                        <p class="cgm-gallery-download-all">
+                            <a class="wp-element-button cgm-download-trigger"
+                            href="<?php echo esc_url( cgm_download_all_url( $gallery_id ) ); ?>">
+                                <?php esc_html_e( 'Download all as ZIP', 'client-gallery' ); ?>
+                            </a>
+                        </p>
+
+                    <?php else : ?>
+
+                        <div class="cgm-gallery-download-all">
+                            <a class="wp-element-button cgm-download-trigger"
+                            href="#"
+                            data-cgm-download-all="1">
+                                <?php esc_html_e( 'Download all as ZIP', 'client-gallery' ); ?>
+                            </a>
+                        </div>
+
+                    <?php endif; ?>
+
+                <?php else : ?>
 
                     <p class="cgm-gallery-download-all">
                         <a class="wp-element-button cgm-download-trigger"
-                           href="<?php echo esc_url( cgm_download_all_url( $gallery_id ) ); ?>">
+                        href="<?php echo esc_url( cgm_download_all_url( $gallery_id ) ); ?>">
                             <?php esc_html_e( 'Download all as ZIP', 'client-gallery' ); ?>
                         </a>
                     </p>
 
-                <?php else : ?>
+                <?php endif; ?>
 
-                    <!-- Download password is required, but we use a modal instead of inline form.
-                         JS will open the modal when this button is clicked. -->
-                    <div class="cgm-gallery-download-all">
-                        <a class="wp-element-button cgm-download-trigger"
-                        href="#"
-                        data-cgm-download-all="1">
-                            <?php esc_html_e( 'Download all as ZIP', 'client-gallery' ); ?>
-                        </a>
-                    </div>
+                <?php if ( $is_public_gallery ) : ?>
+
+                    <!-- Generic share (native share sheet in real browsers) -->
+                    <button type="button"
+                            class="wp-element-button cgm-share-trigger"
+                            data-cgm-share-url="<?php echo esc_url( $cgm_share_url ); ?>">
+                        <?php esc_html_e( 'Share', 'client-gallery' ); ?>
+                    </button>
+
+                    <!-- Meta fallback: Share to Facebook -->
+                    <a class="wp-element-button cgm-share-facebook"
+                    href="<?php echo esc_url( 'https://www.facebook.com/sharer/sharer.php?u=' . rawurlencode( $cgm_share_url ) ); ?>"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    hidden>
+                        <?php esc_html_e( 'Share to Facebook', 'client-gallery' ); ?>
+                    </a>
+
+                    <!-- Meta fallback: Copy link -->
+                    <button type="button"
+                            class="wp-element-button cgm-copy-link"
+                            data-cgm-share-url="<?php echo esc_url( $cgm_share_url ); ?>"
+                            hidden>
+                        <?php esc_html_e( 'Copy link', 'client-gallery' ); ?>
+                    </button>
 
                 <?php endif; ?>
 
-            <?php else : ?>
 
-                <p class="cgm-gallery-download-all">
-                    <a class="wp-element-button cgm-download-trigger"
-                       href="<?php echo esc_url( cgm_download_all_url( $gallery_id ) ); ?>">
-                        <?php esc_html_e( 'Download all as ZIP', 'client-gallery' ); ?>
-                    </a>
-                </p>
-
-            <?php endif; ?>
+            </div>
         </div>
+
 
         <?php
         $can_download = false;

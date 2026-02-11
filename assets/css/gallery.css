@@ -46,6 +46,17 @@
     justify-content: center;
 }
 
+.cgm-gallery-actions{
+  display:flex;
+  gap:.75rem;
+  flex-wrap:wrap;
+  align-items:center;
+}
+.cgm-gallery-download-all{
+  margin:0;
+}
+
+
 /* ---------------------------
    Main gallery grid
    --------------------------- */
