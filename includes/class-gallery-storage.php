@@ -302,11 +302,17 @@ class CGM_Gallery_Storage {
         $orig_w = imagesx( $src );
         $orig_h = imagesy( $src );
 
-        $max_dim = 900;
-        $scale   = min( $max_dim / max( $orig_w, 1 ), $max_dim / max( $orig_h, 1 ), 1 );
+        $target_w = 1080;
 
-        $new_w = max( 1, intval( $orig_w * $scale ) );
-        $new_h = max( 1, intval( $orig_h * $scale ) );
+        // Do not upscale smaller images
+        if ( $orig_w <= $target_w ) {
+            $new_w = $orig_w;
+            $new_h = $orig_h;
+        } else {
+            $scale = $target_w / $orig_w;
+            $new_w = $target_w;
+            $new_h = max( 1, intval( $orig_h * $scale ) );
+        }
 
         $dst = imagecreatetruecolor( $new_w, $new_h );
         imagecopyresampled( $dst, $src, 0, 0, 0, 0, $new_w, $new_h, $orig_w, $orig_h );

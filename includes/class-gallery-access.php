@@ -369,18 +369,21 @@ class CGM_Gallery_Access {
         $cookie_name = 'cgm_gallery_view_' . intval( $post_id );
         $expire      = time() + DAY_IN_SECONDS;
 
-        setcookie(
-            $cookie_name,
-            $token,
-            [
-                'expires'  => $expire,
-                'path'     => COOKIEPATH,
-                'domain'   => COOKIE_DOMAIN,
-                'secure'   => is_ssl(),
-                'httponly' => true,
-                'samesite' => 'Lax',
-            ]
-        );
+        $cookie_args = [
+            'expires'  => $expire,
+            'path'     => defined('COOKIEPATH') && COOKIEPATH ? COOKIEPATH : '/',
+            'secure'   => is_ssl(),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ];
+
+        // Only set domain if it’s a real domain (empty string breaks cookies on some setups)
+        if ( defined('COOKIE_DOMAIN') && ! empty( COOKIE_DOMAIN ) ) {
+            $cookie_args['domain'] = COOKIE_DOMAIN;
+        }
+
+        setcookie( $cookie_name, $token, $cookie_args );
+
 
         $_COOKIE[ $cookie_name ] = $token;
 
@@ -410,18 +413,21 @@ class CGM_Gallery_Access {
         $cookie_name = 'cgm_gallery_dl_' . intval( $post_id );
         $expire      = time() + DAY_IN_SECONDS;
 
-        setcookie(
-            $cookie_name,
-            $token,
-            [
-                'expires'  => $expire,
-                'path'     => COOKIEPATH,
-                'domain'   => COOKIE_DOMAIN,
-                'secure'   => is_ssl(),
-                'httponly' => true,
-                'samesite' => 'Lax',
-            ]
-        );
+        $cookie_args = [
+            'expires'  => $expire,
+            'path'     => defined('COOKIEPATH') && COOKIEPATH ? COOKIEPATH : '/',
+            'secure'   => is_ssl(),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ];
+
+        // Only set domain if it’s a real domain (empty string breaks cookies on some setups)
+        if ( defined('COOKIE_DOMAIN') && ! empty( COOKIE_DOMAIN ) ) {
+            $cookie_args['domain'] = COOKIE_DOMAIN;
+        }
+
+        setcookie( $cookie_name, $token, $cookie_args );
+
 
         $_COOKIE[ $cookie_name ] = $token;
 
@@ -567,11 +573,23 @@ class CGM_Gallery_Access {
             $submitted = (string) wp_unslash( $_POST['cgm_download_password'] );
 
             if ( self::try_unlock_download_with_password( $post_id, $submitted ) ) {
-                wp_safe_redirect( get_permalink( $post_id ) . '#downloads' );
+
+                // If the front-end provided an intended download URL, go there immediately (better UX).
+                $redirect = isset( $_POST['cgm_download_redirect'] )
+                    ? wp_unslash( $_POST['cgm_download_redirect'] )
+                    : '';
+
+                // Only allow safe redirects; fallback to gallery downloads section.
+                $fallback = get_permalink( $post_id ) . '#downloads';
+                $redirect = wp_validate_redirect( $redirect, $fallback );
+
+                wp_safe_redirect( $redirect );
                 exit;
+
             } else {
                 $password_error = true;
             }
+
         } else {
             $password_error = true;
         }

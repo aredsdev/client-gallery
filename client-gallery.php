@@ -73,7 +73,7 @@ function cgm_register_assets() {
         'cgm-gallery-lightbox',
         CGM_PLUGIN_URL . 'assets/js/gallery-lightbox.js',
         [],
-        '0.1.0',
+        '0.1.2',
         true
     );
 
@@ -81,7 +81,7 @@ function cgm_register_assets() {
         'cgm-password-modal-js',
         CGM_PLUGIN_URL . 'assets/js/password-modal.js',
         [],
-        '0.1.3',
+        '0.1.4',
         true
     );
 
@@ -130,6 +130,7 @@ function cgm_enqueue_frontend_assets() {
                 [
                     'requiresPassword' => $requires_download_password ? 1 : 0,
                     'downloadUnlocked' => $download_unlocked ? 1 : 0,
+                    'adminPostUrl'     => admin_url( 'admin-post.php' ),
                 ]
             );
         }
@@ -421,7 +422,10 @@ function cgm_render_client_gallery_content( $content ) {
                 <input type="hidden"
                        name="cgm_download_password_post"
                        value="<?php echo esc_attr( $gallery_id ); ?>" />
-
+                <input type="hidden" 
+                        name="cgm_download_redirect" 
+                        id="cgm_download_redirect" 
+                        value="" />
                 <p>
                     <label for="cgm_download_password">
                         <?php esc_html_e( 'Password', 'client-gallery' ); ?>

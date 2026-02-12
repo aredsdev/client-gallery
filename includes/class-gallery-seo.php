@@ -91,31 +91,52 @@ class CGM_Gallery_SEO {
      * Public:  "{Gallery Title} – Photo {n}"
      * Private: "Private client photo {n}"
      */
-    public static function build_image_alt( $gallery_id, $index = 0, $file = [] ) {
-        $gallery_id = (int) $gallery_id;
-        $index      = (int) $index;
+    public static function build_image_alt( $gallery_id, $index, $file ) {
 
-        $n = $index > 0 ? $index : 0;
+        $gallery_id = intval( $gallery_id );
+        $index      = max( 1, intval( $index ) );
 
+        // If private, keep it generic (don’t leak names/venue).
         if ( self::is_gallery_private( $gallery_id ) ) {
-            $alt = $n > 0
-                ? sprintf( 'Private client photo %d', $n )
-                : 'Private client photo';
-        } else {
-            $title = get_the_title( $gallery_id );
-            $title = $title ? $title : 'Client gallery';
-
-            $alt = $n > 0
-                ? sprintf( '%s – Photo %d', $title, $n )
-                : $title;
+            return sprintf( 'Private client photo %d', $index );
         }
 
-        return apply_filters(
-            'cgm_image_alt',
-            $alt,
-            $gallery_id,
-            $index,
-            $file
-        );
+        // Gallery title as the base (best primary signal).
+        $title = get_the_title( $gallery_id );
+        if ( ! $title ) {
+            $title = 'Client gallery';
+        }
+
+        // Optional filename hint (only if it looks human).
+        $filename = isset( $file['basename'] )
+            ? pathinfo( $file['basename'], PATHINFO_FILENAME )
+            : '';
+
+        $filename = str_replace( [ '-', '_' ], ' ', $filename );
+        $filename = trim( preg_replace( '/\s+/', ' ', $filename ) );
+
+        // If filename is basically numbers/DSC style, ignore it.
+        if ( $filename && preg_match( '/^(img|dsc|p\d+|image)\s*\d*$/i', $filename ) ) {
+            $filename = '';
+        }
+
+        // Avoid repeating title
+        if ( $filename && stripos( $title, $filename ) !== false ) {
+            $filename = '';
+        }
+
+        $alt_parts = [ $title ];
+
+        if ( $filename ) {
+            $alt_parts[] = $filename;
+        } else {
+            // Always include an index so alts are unique.
+            $alt_parts[] = sprintf( 'Photo %d', $index );
+        }
+
+        // Light local signal without forcing service type.
+        $alt_parts[] = 'Ottawa';
+
+        return implode( ' – ', $alt_parts );
     }
 }

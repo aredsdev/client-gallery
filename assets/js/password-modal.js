@@ -81,20 +81,44 @@
                     // Otherwise intercept:
                     // 1) remember what we were trying to download,
                     // 2) open the modal.
-                    var href = el.getAttribute('href') || '';
-                    if (galleryId && href) {
+                    // Prefer an explicit intended download URL when available (lightbox sets data-cgm-download-url).
+                    var intendedHref =
+                        el.getAttribute('data-cgm-download-url') ||
+                        el.dataset.cgmDownloadUrl || // for safety (same thing)
+                        el.getAttribute('href') ||
+                        '';
+
+                    // If this is the locked "Download all" button, build the correct ZIP download URL.
+                    if ((!intendedHref || intendedHref === '#') && el.hasAttribute('data-cgm-download-all')) {
+                        var settings = window.cgmPasswordSettings || {};
+                        var adminPostUrl = settings.adminPostUrl || '/wp-admin/admin-post.php';
+
+                        intendedHref =
+                            adminPostUrl +
+                            '?action=cgm_download_all&gallery_id=' +
+                            encodeURIComponent(galleryId);
+                    }
+
+                    if (galleryId && intendedHref) {
                         try {
                             sessionStorage.setItem(
                                 STORAGE_KEY,
                                 JSON.stringify({
                                     galleryId: galleryId,
-                                    href: href
+                                    href: intendedHref
                                 })
                             );
                         } catch (err) {
                             // ignore storage errors
                         }
                     }
+
+                    // Also write it into the hidden redirect field so the PHP handler can redirect immediately.
+                    var redirectInput = document.getElementById('cgm_download_redirect');
+                    if (redirectInput) {
+                        redirectInput.value = intendedHref;
+                    }
+
 
                     e.preventDefault();
                     openModal();
@@ -129,27 +153,12 @@
             openModal();
         }
 
-        // After a successful unlock + redirect, auto-run the pending download once.
+        // With server-side redirect (PHP), don't auto-navigate here.
+        // Just clear any pending download so it can't fire twice.
         try {
-            var raw = sessionStorage.getItem(STORAGE_KEY);
-            if (raw && galleryId) {
-                var data = JSON.parse(raw);
-                var state = getPasswordState();
+            sessionStorage.removeItem(STORAGE_KEY);
+        } catch (e) {}
 
-                if (
-                    data &&
-                    data.galleryId === galleryId &&
-                    state.requiresPassword &&
-                    state.downloadUnlocked
-                ) {
-                    // Clear before navigating so it doesn't repeat.
-                    sessionStorage.removeItem(STORAGE_KEY);
-                    window.location.href = data.href;
-                }
-            }
-        } catch (e) {
-            // ignore JSON / storage errors
-        }
     }
 
     // Run init immediately if DOM is ready, otherwise on DOMContentLoaded.

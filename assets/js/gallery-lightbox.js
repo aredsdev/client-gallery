@@ -13,6 +13,39 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let currentIndex = -1;
 
+    function deriveDownloadUrlFromThumbUrl(url) {
+        try {
+            const u = new URL(url, window.location.href);
+
+            // Your thumbs use ?cgm_thumb=1, not action=cgm_thumb
+            if (u.searchParams.get('cgm_thumb') === '1') {
+
+                const galleryId = u.searchParams.get('gallery_id');
+                const file      = u.searchParams.get('file');
+
+                if (!galleryId || !file) {
+                    return '';
+                }
+
+                const adminPostUrl =
+                    (window.cgmPasswordSettings && window.cgmPasswordSettings.adminPostUrl)
+                    ? window.cgmPasswordSettings.adminPostUrl
+                    : '/wp-admin/admin-post.php';
+
+                return (
+                    adminPostUrl +
+                    '?action=cgm_download' +
+                    '&gallery_id=' + encodeURIComponent(galleryId) +
+                    '&file=' + encodeURIComponent(file)
+                );
+            }
+
+        } catch (e) {}
+
+        return '';
+    }
+
+
     function showImageForIndex(index) {
         const count = triggers.length;
         if (!count) return;
@@ -25,20 +58,44 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         currentIndex = index;
-        const trigger     = triggers[currentIndex];
-        const thumbUrl    = trigger.dataset.thumb || trigger.href;
-        const downloadUrl = trigger.dataset.download || trigger.href;
+        const trigger = triggers[currentIndex];
+        const thumbUrl = trigger.dataset.thumb || trigger.href;
 
+        // Always show the image from the thumb URL
         if (thumbUrl) {
             imageEl.src = thumbUrl;
         } else {
             imageEl.removeAttribute('src');
         }
 
+        // Prefer real download URL when it exists (unlocked), otherwise derive it from thumb URL.
+        let downloadUrl = trigger.dataset.download || '';
+        if (!downloadUrl && thumbUrl) {
+            downloadUrl = deriveDownloadUrlFromThumbUrl(thumbUrl);
+        }
+
+        // Check download lock state (set by your PHP data attributes)
+        const modal = document.getElementById('cgm-download-password-modal');
+        const requiresPw = modal && modal.dataset.cgmRequiresPassword === '1';
+        const unlocked = modal && modal.dataset.cgmDownloadUnlocked === '1';
+
         if (downloadUrl) {
-            downloadEl.href = downloadUrl;
-            downloadEl.removeAttribute('aria-disabled');
+            if (requiresPw && !unlocked) {
+                // Locked: store intended URL for password modal, but don't navigate
+                downloadEl.dataset.cgmDownloadUrl = downloadUrl;
+                downloadEl.setAttribute('data-cgm-download-url', downloadUrl); // for password-modal.js
+                downloadEl.href = '#';
+                downloadEl.removeAttribute('aria-disabled');
+            } else {
+                // Unlocked: allow direct download
+                downloadEl.dataset.cgmDownloadUrl = '';
+                downloadEl.removeAttribute('data-cgm-download-url');
+                downloadEl.href = downloadUrl;
+                downloadEl.removeAttribute('aria-disabled');
+            }
         } else {
+            downloadEl.dataset.cgmDownloadUrl = '';
+            downloadEl.removeAttribute('data-cgm-download-url');
             downloadEl.removeAttribute('href');
             downloadEl.setAttribute('aria-disabled', 'true');
         }

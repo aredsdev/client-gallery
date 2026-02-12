@@ -137,6 +137,7 @@ class CGM_Gallery_Download {
      * Stream a single original file as an attachment.
      */
     public static function handle_download() {
+
         $gallery_id = isset( $_GET['gallery_id'] ) ? (int) $_GET['gallery_id'] : 0;
         $file       = isset( $_GET['file'] ) ? rawurldecode( $_GET['file'] ) : '';
 
@@ -145,36 +146,81 @@ class CGM_Gallery_Download {
             exit;
         }
 
-        // 🔐 Access check
         if ( get_post_type( $gallery_id ) !== 'client_gallery' ) {
             status_header( 404 );
             exit;
         }
+
         if ( class_exists( 'CGM_Gallery_Access' ) && ! CGM_Gallery_Access::user_can_download( $gallery_id ) ) {
             status_header( 403 );
             exit;
         }
 
-        $orig_dir = CGM_Gallery_Storage::original_dir( $gallery_id );
-        $basename = basename( $file ); // avoid path traversal
-        $path     = rtrim( $orig_dir, '/\\' ) . '/' . $basename;
+        // Resolve the requested file the SAME way ZIP does: from storage metadata.
+        $requested = basename( $file );
+        $files     = CGM_Gallery_Storage::get_files( $gallery_id );
 
-        if ( ! file_exists( $path ) ) {
+        $path = '';
+        $basename = '';
+
+        foreach ( $files as $f ) {
+            if ( empty( $f['basename'] ) || empty( $f['original_path'] ) ) {
+                continue;
+            }
+
+            if ( $f['basename'] === $requested ) {
+                $path     = $f['original_path'];
+                $basename = $f['basename'];
+                break;
+            }
+        }
+
+        if ( ! $path || ! file_exists( $path ) || ! is_readable( $path ) ) {
             status_header( 404 );
             exit;
         }
 
-        $mime = mime_content_type( $path ) ?: 'application/octet-stream';
+        // Clear buffers (critical).
+        while ( ob_get_level() ) {
+            ob_end_clean();
+        }
 
-        header( 'Content-Description: File Transfer' );
-        header( 'Content-Type: ' . $mime );
-        header( 'Content-Disposition: attachment; filename="' . $basename . '"' );
-        header( 'Content-Length: ' . filesize( $path ) );
-        header( 'Cache-Control: private' );
+        // Disable compression (helps avoid corrupted output / blank responses).
+        if ( function_exists( 'apache_setenv' ) ) {
+            @apache_setenv( 'no-gzip', '1' );
+        }
+        @ini_set( 'zlib.output_compression', 'Off' );
+        if ( function_exists( 'header_remove' ) ) {
+            @header_remove( 'Content-Encoding' );
+        }
 
-        readfile( $path );
+        $download_name = sanitize_file_name( $basename );
+        $filesize      = filesize( $path );
+
+        header( 'CDN-Cache-Control: no-store' );
+        header( 'Cloudflare-CDN-Cache-Control: no-store' );
+        header( 'X-Content-Type-Options: nosniff' );
+
+        header( 'Content-Type: application/octet-stream' );
+        header( 'Content-Disposition: attachment; filename="' . $download_name . '"; filename*=UTF-8\'\'' . rawurlencode( $download_name ) );
+        header( 'Content-Length: ' . $filesize );
+        header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
+        header( 'Pragma: public' );
+        header( 'Expires: 0' );
+
+        $fp = fopen( $path, 'rb' );
+        if ( $fp ) {
+            while ( ! feof( $fp ) ) {
+                echo fread( $fp, 8192 );
+                flush();
+            }
+            fclose( $fp );
+        }
+
         exit;
     }
+
+
 
     /**
      * Helper: path to the persistent ZIP on disk for a gallery.
@@ -295,6 +341,9 @@ class CGM_Gallery_Download {
         while ( ob_get_level() ) {
             ob_end_clean();
         }
+
+        header( 'CDN-Cache-Control: no-store' );
+        header( 'Cloudflare-CDN-Cache-Control: no-store' );
 
         header( 'Content-Type: application/zip' );
         header( 'Content-Disposition: attachment; filename="' . $download_name . '"' );
