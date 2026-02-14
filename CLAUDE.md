@@ -119,11 +119,11 @@ client-gallery/
 
 ## Recent Git History
 ```
-03a84c9  add programmatic ImageObject JSON-LD schema to gallery pages
-dccc298  fix download button initial pw input
-9965fd4  stable — added share button
-c53f911  working links only render if pw entered
-931bf70  commit before SEO changes
+(pending)  Cache-Control: public for public gallery thumbnails (Cloudflare caching)
+(pending)  add Open Graph tags and Yoast OG image injection for gallery pages
+03a84c9    add programmatic ImageObject JSON-LD schema to gallery pages
+dccc298    fix download button initial pw input
+9965fd4    stable — added share button
 ```
 
 ---
@@ -159,6 +159,22 @@ endpoint.
 
 **Do NOT allow the original JPEG to be served through the thumb endpoint.** The access-controlled
 thumbnail pipeline (watermarked WebP, access-gated) is the only intended path for frontend image delivery.
+
+---
+
+## SEO Audit — Completed Items
+- ✅ Robots `noindex/nofollow` for private galleries (`filter_wp_robots`)
+- ✅ Canonical fallback (skips if Yoast/RankMath active)
+- ✅ Alt text: unique per image — `CGM_Gallery_SEO::build_image_alt($id, $i+1, $file)` called in client-gallery.php:347
+- ✅ JSON-LD `ImageObject` schema on public gallery pages (admin UI: location, social URLs, news URLs)
+- ✅ Open Graph + Twitter Card tags with Yoast integration
+- ✅ `Cache-Control: public, max-age=86400` for public gallery thumbnails (Cloudflare edge caching)
+- ✅ `Cache-Control: private, no-store` for private gallery thumbnails
+- ✅ robots.txt: removed `Disallow: /*?cgm_thumb=` (access control handles private images server-side)
+
+## Pending / Future SEO
+- ⏳ Image sitemap — optional enhancement; images already discovered via `<img>` tags on gallery pages
+- ⏳ File sort order — use zero-padded Lightroom export filenames (e.g. `name-001.jpg`) so `scandir()` alphabetical = intended order
 
 ---
 
