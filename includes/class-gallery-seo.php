@@ -16,6 +16,9 @@ class CGM_Gallery_SEO {
         add_filter( 'wp_robots', [ __CLASS__, 'filter_wp_robots' ], 999 );
         add_action( 'wp_head', [ __CLASS__, 'output_canonical_fallback' ], 1 );
         add_action( 'wp_head', [ __CLASS__, 'output_schema_json_ld' ], 5 );
+        add_action( 'wp_head', [ __CLASS__, 'output_og_tags' ], 20 );
+        // Inject cover image into Yoast's own OG image pipeline (fires before wp_head priority 20).
+        add_action( 'wpseo_add_opengraph_images', [ __CLASS__, 'inject_yoast_og_image' ] );
     }
 
     /**
@@ -229,5 +232,117 @@ class CGM_Gallery_SEO {
         echo "\n" . '<script type="application/ld+json">'
             . wp_json_encode( $schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT )
             . '</script>' . "\n";
+    }
+
+    /**
+     * Open Graph / Twitter Card tags for gallery pages.
+     *
+     * Strategy:
+     *  - Yoast/RankMath active + featured image set → do nothing, SEO plugin handles it.
+     *  - Yoast/RankMath active + NO featured image → inject og:image / twitter:image
+     *    using the gallery cover thumb as the fallback (watermarked, publicly accessible).
+     *  - No SEO plugin → output a minimal but complete OG + Twitter set.
+     *
+     * Fires at priority 20, after Yoast (priority 1–11), so did_action checks are reliable.
+     */
+    public static function output_og_tags() {
+        if ( ! is_singular( 'client_gallery' ) ) {
+            return;
+        }
+
+        $gallery_id = get_queried_object_id();
+        if ( $gallery_id <= 0 || self::is_gallery_private( $gallery_id ) ) {
+            return;
+        }
+
+        // Build the cover image thumbnail URL (public for public galleries).
+        $cover_url  = '';
+        $cover_base = get_post_meta( $gallery_id, '_cgm_cover_image', true );
+
+        if ( $cover_base ) {
+            $cover_url = add_query_arg( [
+                'cgm_thumb'  => 1,
+                'gallery_id' => $gallery_id,
+                'file'       => $cover_base,
+            ], home_url( '/' ) );
+        }
+
+        $has_featured = has_post_thumbnail( $gallery_id );
+        // Check if Yoast actually ran its head output (not just installed).
+        $yoast_ran    = did_action( 'wpseo_head' ) > 0;
+        $rankmath_ran = did_action( 'rank_math/head' ) > 0;
+
+        if ( $yoast_ran || $rankmath_ran ) {
+            // SEO plugin ran — it handles title/description/URL.
+            // Only inject image if no featured image (Yoast may have skipped it).
+            if ( ! $has_featured && $cover_url ) {
+                echo '<meta property="og:image" content="' . esc_url( $cover_url ) . '" />' . "\n";
+                echo '<meta name="twitter:card" content="summary_large_image" />' . "\n";
+                echo '<meta name="twitter:image" content="' . esc_url( $cover_url ) . '" />' . "\n";
+            }
+            return;
+        }
+
+        // No SEO plugin — output a full minimal OG + Twitter set.
+        $title  = get_the_title( $gallery_id );
+        $desc   = wp_strip_all_tags( get_the_excerpt( $gallery_id ) );
+        $url    = get_permalink( $gallery_id );
+        $image  = $has_featured
+            ? get_the_post_thumbnail_url( $gallery_id, 'large' )
+            : $cover_url;
+
+        echo '<meta property="og:type"  content="article" />' . "\n";
+        echo '<meta property="og:title" content="' . esc_attr( $title ) . '" />' . "\n";
+        echo '<meta property="og:url"   content="' . esc_url( $url ) . '" />' . "\n";
+
+        if ( $desc ) {
+            echo '<meta property="og:description" content="' . esc_attr( $desc ) . '" />' . "\n";
+        }
+
+        if ( $image ) {
+            echo '<meta property="og:image"        content="' . esc_url( $image ) . '" />' . "\n";
+            echo '<meta name="twitter:card"        content="summary_large_image" />' . "\n";
+            echo '<meta name="twitter:image"       content="' . esc_url( $image ) . '" />' . "\n";
+            echo '<meta name="twitter:title"       content="' . esc_attr( $title ) . '" />' . "\n";
+            if ( $desc ) {
+                echo '<meta name="twitter:description" content="' . esc_attr( $desc ) . '" />' . "\n";
+            }
+        }
+    }
+
+    /**
+     * Inject the gallery cover image into Yoast's OG image pipeline.
+     *
+     * Fires via wpseo_add_opengraph_images — only used when Yoast IS active and
+     * handling OG for this CPT. Skips if a featured image already covers it.
+     *
+     * @param \WPSEO_OpenGraph_Image $image_container Yoast image manager.
+     */
+    public static function inject_yoast_og_image( $image_container ) {
+        if ( ! is_singular( 'client_gallery' ) ) {
+            return;
+        }
+
+        $gallery_id = get_queried_object_id();
+        if ( ! $gallery_id || self::is_gallery_private( $gallery_id ) ) {
+            return;
+        }
+
+        if ( has_post_thumbnail( $gallery_id ) ) {
+            return; // Yoast picks up the featured image automatically.
+        }
+
+        $cover_base = get_post_meta( $gallery_id, '_cgm_cover_image', true );
+        if ( ! $cover_base ) {
+            return;
+        }
+
+        $cover_url = add_query_arg( [
+            'cgm_thumb'  => 1,
+            'gallery_id' => $gallery_id,
+            'file'       => $cover_base,
+        ], home_url( '/' ) );
+
+        $image_container->add_image_by_url( $cover_url );
     }
 }
