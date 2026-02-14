@@ -75,9 +75,16 @@ class CGM_Gallery_Storage {
             exit;
         }
 
+        $is_private = class_exists( 'CGM_Gallery_Access' )
+            && method_exists( 'CGM_Gallery_Access', 'gallery_is_private' )
+            && CGM_Gallery_Access::gallery_is_private( $gallery_id );
+
         header( 'Content-Type: image/webp' );
         header( 'Content-Length: ' . (string) filesize( $thumb ) );
-        header( 'Cache-Control: private, max-age=3600' );
+        header( $is_private
+            ? 'Cache-Control: private, no-store'
+            : 'Cache-Control: public, max-age=86400'
+        );
 
         readfile( $thumb );
         exit;
