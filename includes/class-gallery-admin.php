@@ -41,6 +41,15 @@ class CGM_Gallery_Admin {
             'normal',
             'default'
         );
+
+        add_meta_box(
+            'cgm_gallery_schema',
+            'Schema Markup',
+            [ __CLASS__, 'render_schema_metabox' ],
+            'client_gallery',
+            'normal',
+            'default'
+        );
     }
 
     public static function render_files_metabox( $post ) {
@@ -156,6 +165,47 @@ class CGM_Gallery_Admin {
         echo '</span></p>';
     }
 
+    public static function render_schema_metabox( $post ) {
+        $location    = get_post_meta( $post->ID, '_cgm_schema_location', true );
+        $social_urls = get_post_meta( $post->ID, '_cgm_schema_social_urls', true );
+
+        echo '<p>';
+        echo '<label for="cgm_schema_location"><strong>Location / Venue</strong></label><br>';
+        echo '<input type="text" id="cgm_schema_location" name="cgm_schema_location"'
+            . ' value="' . esc_attr( $location ) . '" style="width:100%;"'
+            . ' placeholder="e.g. ByWard Market" />';
+        echo '<br><span style="font-size:11px;color:#555;">'
+            . 'Where the photos were taken. Ottawa, ON, CA address is added automatically.'
+            . '</span>';
+        echo '</p>';
+
+        $news_urls = get_post_meta( $post->ID, '_cgm_schema_news_urls', true );
+
+        echo '<p>';
+        echo '<label for="cgm_schema_social_urls"><strong>Social media appearances</strong></label><br>';
+        echo '<textarea id="cgm_schema_social_urls" name="cgm_schema_social_urls"'
+            . ' style="width:100%;height:90px;"'
+            . ' placeholder="https://www.instagram.com/p/...' . "\n" . 'https://www.reddit.com/r/ottawa/...">'
+            . esc_textarea( $social_urls )
+            . '</textarea>';
+        echo '<br><span style="font-size:11px;color:#555;">'
+            . 'One URL per line. Instagram, Reddit, Facebook, etc.'
+            . '</span>';
+        echo '</p>';
+
+        echo '<p>';
+        echo '<label for="cgm_schema_news_urls"><strong>News / press coverage</strong></label><br>';
+        echo '<textarea id="cgm_schema_news_urls" name="cgm_schema_news_urls"'
+            . ' style="width:100%;height:90px;"'
+            . ' placeholder="https://www.cbc.ca/...">'
+            . esc_textarea( $news_urls )
+            . '</textarea>';
+        echo '<br><span style="font-size:11px;color:#555;">'
+            . 'One URL per line. Articles, blog posts, press coverage featuring this gallery.'
+            . '</span>';
+        echo '</p>';
+    }
+
     public static function save_gallery_meta( $post_id ) {
 
         if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) return;
@@ -204,6 +254,36 @@ class CGM_Gallery_Admin {
                 delete_post_meta( $post_id, '_cgm_folder_name' );
             } else {
                 update_post_meta( $post_id, '_cgm_folder_name', $folder_slug );
+            }
+        }
+
+        // Save schema location (venue name for contentLocation).
+        if ( isset( $_POST['cgm_schema_location'] ) ) {
+            $location = sanitize_text_field( wp_unslash( $_POST['cgm_schema_location'] ) );
+            if ( $location === '' ) {
+                delete_post_meta( $post_id, '_cgm_schema_location' );
+            } else {
+                update_post_meta( $post_id, '_cgm_schema_location', $location );
+            }
+        }
+
+        // Save social appearance URLs (newline-separated, sanitized on output).
+        if ( isset( $_POST['cgm_schema_social_urls'] ) ) {
+            $urls_raw = sanitize_textarea_field( wp_unslash( $_POST['cgm_schema_social_urls'] ) );
+            if ( $urls_raw === '' ) {
+                delete_post_meta( $post_id, '_cgm_schema_social_urls' );
+            } else {
+                update_post_meta( $post_id, '_cgm_schema_social_urls', $urls_raw );
+            }
+        }
+
+        // Save news / press coverage URLs.
+        if ( isset( $_POST['cgm_schema_news_urls'] ) ) {
+            $urls_raw = sanitize_textarea_field( wp_unslash( $_POST['cgm_schema_news_urls'] ) );
+            if ( $urls_raw === '' ) {
+                delete_post_meta( $post_id, '_cgm_schema_news_urls' );
+            } else {
+                update_post_meta( $post_id, '_cgm_schema_news_urls', $urls_raw );
             }
         }
     }
