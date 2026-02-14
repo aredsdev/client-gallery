@@ -496,12 +496,18 @@ class CGM_Gallery_Storage {
                 admin_url( 'admin-post.php' )
             );
 
+            $size = @getimagesize( $thumb_full );
+            $t_w  = $size ? (int) $size[0] : 0;
+            $t_h  = $size ? (int) $size[1] : 0;
+
             $out[] = [
                 'basename'      => $file,
                 'original_path' => $full,
                 'thumb_path'    => $thumb_full,
                 'download_url'  => $download_url,
                 'thumb_url'     => $thumb_url,
+                'width'         => $t_w,
+                'height'        => $t_h,
             ];
         }
 

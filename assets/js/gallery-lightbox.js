@@ -163,6 +163,22 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // Touch swipe: left = next, right = prev
+    var touchStartX = 0;
+    var touchStartY = 0;
+    overlay.addEventListener('touchstart', function (e) {
+        touchStartX = e.changedTouches[0].clientX;
+        touchStartY = e.changedTouches[0].clientY;
+    }, { passive: true });
+    overlay.addEventListener('touchend', function (e) {
+        if (!overlay.classList.contains('is-visible')) return;
+        var dx = e.changedTouches[0].clientX - touchStartX;
+        var dy = e.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+            showImageForIndex(currentIndex + (dx < 0 ? 1 : -1));
+        }
+    }, { passive: true });
+
     // Keyboard controls: ESC, Left, Right
     document.addEventListener('keydown', function (e) {
         if (!overlay.classList.contains('is-visible')) return;

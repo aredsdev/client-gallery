@@ -6,7 +6,7 @@ Images are stored **outside** the media library at `/var/www/client_galleries/`.
 
 - **Plugin slug:** `client-gallery`
 - **Custom post type:** `client_gallery`
-- **Version:** 0.1.2
+- **Version:** 0.1.5
 - **Author:** Allen Redshaw
 
 ---
@@ -15,21 +15,21 @@ Images are stored **outside** the media library at `/var/www/client_galleries/`.
 
 ```
 client-gallery/
-├── client-gallery.php              # Main bootstrap (467 lines) — CPT, asset enqueue, gallery render
+├── client-gallery.php              # Main bootstrap — CPT, taxonomy, asset enqueue, gallery render
 ├── includes/
 │   ├── class-gallery-admin.php     # Admin UI, meta boxes, upload/sync/zip actions
 │   ├── class-gallery-access.php    # Password validation, signed cookie tokens, access gating
 │   ├── class-gallery-blocks.php    # Gutenberg block (client-gallery/index)
 │   ├── class-gallery-download.php  # Single image + bulk ZIP download endpoints
 │   ├── class-gallery-seo.php       # Robots meta, canonical, ALT text, JSON-LD ImageObject, OG tags
-│   └── class-gallery-storage.php   # Image I/O, WebP thumbnail gen, watermarking
+│   └── class-gallery-storage.php   # Image I/O, WebP thumbnail gen, watermarking, dimensions
 ├── assets/
 │   ├── css/
-│   │   ├── gallery.css             # Responsive grid layout
+│   │   ├── gallery.css             # CSS columns masonry grid + index block layout
 │   │   ├── lightbox.css            # Lightbox overlay
 │   │   └── password-modal.css      # Download password modal
 │   └── js/
-│       ├── gallery-lightbox.js     # Lightbox interaction & keyboard nav
+│       ├── gallery-lightbox.js     # Lightbox interaction, keyboard nav, touch swipe
 │       ├── gallery-share.js        # Web Share API + clipboard fallback
 │       ├── password-modal.js       # Download password modal logic
 │       └── block-client-gallery-index.js  # Gutenberg block editor JS
@@ -40,10 +40,10 @@ client-gallery/
 ---
 
 ## Tech Stack
-- **PHP 7.0+** — No Composer, no external PHP libs
+- **PHP 7.4+** — No Composer, no external PHP libs
 - **WordPress** — hooks, post meta, nonces, password hashing
 - **Vanilla JS** — No jQuery; ES5/ES6, no build step
-- **CSS3** — Custom properties, CSS Grid, mobile-first
+- **CSS3** — Custom properties, CSS columns masonry, mobile-first
 - **PHP GD** — Thumbnail generation + watermarking
 - **ZipArchive** — Bulk download ZIP creation
 
@@ -66,7 +66,7 @@ client-gallery/
 /var/www/client_galleries/
 └── {gallery-slug}/
     ├── original/     # Full-size uploaded images
-    ├── thumbs/       # Auto-generated WebP thumbnails
+    ├── thumbs/       # Auto-generated WebP thumbnails ({filename}.webp)
     └── gallery.zip   # Cached bulk download ZIP
 ```
 
@@ -86,6 +86,16 @@ client-gallery/
 
 ---
 
+## Taxonomy
+- **Name:** `gallery_category`
+- **Registered for:** `client_gallery` post type
+- **Hierarchical:** yes (category-style)
+- `public: false`, `rewrite: false` — no front-end archive URLs, no URL slugs exposed
+- `show_in_rest: true` — required for Gutenberg `getEntityRecords` and admin sidebar panel
+- Registered in `cgm_register_gallery_taxonomy()` hooked to `init`
+
+---
+
 ## Admin-Post Endpoints
 | Action | Description |
 |---|---|
@@ -102,10 +112,30 @@ client-gallery/
 
 ---
 
-## Gutenberg Block
-- **Block name:** `client-gallery/index`
-- **Attributes:** `postsPerPage`, `orderBy`, `order`, `minTileWidth`
+## Gutenberg Block (`client-gallery/index`)
+- **Attributes:** `posts_per_page`, `orderBy`, `order`, `minWidth`, `gap`, `category`, `tileBg`
+- `category` — `gallery_category` term ID; 0 = all; renders `tax_query` in WP_Query
+- `tileBg` — hex colour string; sets `--cgm-tile-bg` CSS var inline; shown as `ColorPalette` in Layout panel using TT5 theme colours via `withSelect`
+- `gap` — sets `--cgm-gap` inline (overrides theme block-gap)
+- `minWidth` — sets `--cgm-min-width` inline for index grid `auto-fit` columns
+- JS uses `withSelect` HOC to inject both `galleryCategories` (REST) and `themeColors` (editor settings)
 - Shows cover images; password-protected galleries show a placeholder
+
+---
+
+## Gallery Grid Layout
+- **Individual gallery:** CSS `columns: 220px` masonry — images at native aspect ratio, no cropping
+  - `break-inside: avoid` on `.cgm-item`; `margin-bottom` replaces `gap` (columns don't support gap)
+  - `<img>` tags include `width`/`height` from `getimagesize()` on the WebP thumb → prevents CLS
+- **Index block:** CSS Grid `auto-fit minmax(var(--cgm-min-width), 1fr)`; cover images letterboxed with `object-fit: contain`
+- **Tile background:** `--cgm-tile-bg: #131813` default; all tiles/letterbox bars use `var(--cgm-tile-bg)`
+
+---
+
+## Lightbox
+- Touch swipe left/right to navigate (added to `gallery-lightbox.js`)
+- Keyboard: ESC closes, ArrowLeft/ArrowRight navigates
+- `showImageForIndex()` wraps around at ends
 
 ---
 
@@ -114,17 +144,6 @@ client-gallery/
 - Path traversal protection via `wp_basename()` + strict character validation
 - No right-click on gallery images (soft block)
 - SEO: `noindex/nofollow` on password-protected galleries
-
----
-
-## Recent Git History
-```
-(pending)  Cache-Control: public for public gallery thumbnails (Cloudflare caching)
-(pending)  add Open Graph tags and Yoast OG image injection for gallery pages
-03a84c9    add programmatic ImageObject JSON-LD schema to gallery pages
-dccc298    fix download button initial pw input
-9965fd4    stable — added share button
-```
 
 ---
 
@@ -139,7 +158,7 @@ dccc298    fix download button initial pw input
 - Private galleries → no schema output
 
 ### Open Graph / Twitter Cards
-- Yoast detection: `did_action('wpseo_head') > 0` (NOT `defined('WPSEO_VERSION')` — that only checks installed, not if OG ran)
+- Yoast detection: `did_action('wpseo_head') > 0` (NOT `defined('WPSEO_VERSION')`)
 - If Yoast ran + no featured image → inject `og:image` / `twitter:image` using cover thumb URL
 - Cover image injected into Yoast's own pipeline via `wpseo_add_opengraph_images` action
 - No SEO plugin → full minimal OG + Twitter set output at `wp_head` priority 20
@@ -148,33 +167,25 @@ dccc298    fix download button initial pw input
 ---
 
 ## OG Image Serving — Confirmed Working
-The OG image URL (`?cgm_thumb=1&gallery_id=X&file=cover.jpg`) contains `.jpg` in the `file` param
-(the original filename used as a lookup key), but `handle_thumb_request()` resolves this to
-`thumbs/cover.jpg.webp` and serves it as `Content-Type: image/webp`. The watermark is visible,
-confirming the thumbnail pipeline is operating correctly.
-
-**The `.webp` extension does not appear in the URL** — that is expected. The endpoint is query-string
-based and resolves to the WebP file internally. The original JPEG is never accessible through this
-endpoint.
-
-**Do NOT allow the original JPEG to be served through the thumb endpoint.** The access-controlled
-thumbnail pipeline (watermarked WebP, access-gated) is the only intended path for frontend image delivery.
+The OG image URL (`?cgm_thumb=1&gallery_id=X&file=cover.jpg`) serves from `thumbs/cover.jpg.webp`
+as `Content-Type: image/webp`. The `.webp` extension does not appear in the URL — expected.
+**Do NOT serve originals through the thumb endpoint.**
 
 ---
 
 ## SEO Audit — Completed Items
-- ✅ Robots `noindex/nofollow` for private galleries (`filter_wp_robots`)
+- ✅ Robots `noindex/nofollow` for private galleries
 - ✅ Canonical fallback (skips if Yoast/RankMath active)
-- ✅ Alt text: unique per image — `CGM_Gallery_SEO::build_image_alt($id, $i+1, $file)` called in client-gallery.php:347
-- ✅ JSON-LD `ImageObject` schema on public gallery pages (admin UI: location, social URLs, news URLs)
+- ✅ Alt text: unique per image via `CGM_Gallery_SEO::build_image_alt()`
+- ✅ JSON-LD `ImageObject` schema on public gallery pages
 - ✅ Open Graph + Twitter Card tags with Yoast integration
-- ✅ `Cache-Control: public, max-age=86400` for public gallery thumbnails (Cloudflare edge caching)
-- ✅ `Cache-Control: private, no-store` for private gallery thumbnails
-- ✅ robots.txt: removed `Disallow: /*?cgm_thumb=` (access control handles private images server-side)
+- ✅ `Cache-Control: public` for public thumbnails; `private, no-store` for private
+- ✅ `<img width height>` attributes from `getimagesize()` on WebP thumbs — eliminates CLS
 
-## Pending / Future SEO
-- ⏳ Image sitemap — optional enhancement; images already discovered via `<img>` tags on gallery pages
-- ⏳ File sort order — use zero-padded Lightroom export filenames (e.g. `name-001.jpg`) so `scandir()` alphabetical = intended order
+## Pending / Future
+- ⏳ Image sitemap
+- ⏳ Zero-padded Lightroom filenames for correct `scandir()` sort order
+- ⏳ Theme colour picker for tile bg not pulling child-theme palette correctly (investigate `withSelect` + `core/block-editor` store timing)
 
 ---
 

@@ -24,8 +24,9 @@ class CGM_Gallery_Blocks {
                 'wp-i18n',
                 'wp-block-editor',
                 'wp-components',
+                'wp-data',
             ],
-            '0.1.2',
+            '0.1.5',
             true
         );
 
@@ -53,6 +54,18 @@ class CGM_Gallery_Blocks {
                         'type'    => 'number',
                         'default' => 220,
                     ],
+                    'gap'            => [
+                        'type'    => 'number',
+                        'default' => 16,
+                    ],
+                    'category'       => [
+                        'type'    => 'number',
+                        'default' => 0,
+                    ],
+                    'tileBg'         => [
+                        'type'    => 'string',
+                        'default' => '',
+                    ],
                 ],
                 'supports'        => [
                     'align' => [ 'wide', 'full' ],
@@ -74,16 +87,28 @@ class CGM_Gallery_Blocks {
                 'orderby'        => 'date',
                 'minWidth'       => 220,
                 'gap'            => 16,
+                'category'       => 0,
+                'tileBg'         => '',
             ]
         );
 
-        $query = new WP_Query( [
+        $query_args = [
             'post_type'      => 'client_gallery',
             'post_status'    => 'publish',
             'posts_per_page' => (int) $atts['posts_per_page'],
             'orderby'        => sanitize_text_field( $atts['orderby'] ),
             'order'          => sanitize_text_field( $atts['order'] ),
-        ] );
+        ];
+
+        if ( (int) $atts['category'] > 0 ) {
+            $query_args['tax_query'] = [ [
+                'taxonomy' => 'gallery_category',
+                'field'    => 'term_id',
+                'terms'    => (int) $atts['category'],
+            ] ];
+        }
+
+        $query = new WP_Query( $query_args );
 
         if ( ! $query->have_posts() ) {
             return '<p>' . esc_html__( 'No client galleries available yet.', 'client-gallery' ) . '</p>';
@@ -94,11 +119,17 @@ class CGM_Gallery_Blocks {
             $min_width = 220;
         }
 
-        $gap = max(0, (int) $atts['gap'] );
+        $gap     = max( 0, (int) $atts['gap'] );
+        $tile_bg = sanitize_hex_color( $atts['tileBg'] ?? '' );
+
+        $style = '--cgm-min-width:' . $min_width . 'px;--cgm-gap:' . $gap . 'px';
+        if ( $tile_bg ) {
+            $style .= ';--cgm-tile-bg:' . $tile_bg;
+        }
 
         ob_start();
 
-        echo '<div class="cgm-gallery-index-grid" style="--cgm-min-width:' . esc_attr( $min_width ) . 'px; --cgm-gap:' . esc_attr( $gap ) . 'px">';
+        echo '<div class="cgm-gallery-index-grid" style="' . esc_attr( $style ) . '">';
 
         while ( $query->have_posts() ) {
             $query->the_post();

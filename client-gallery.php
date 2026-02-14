@@ -52,7 +52,7 @@ function cgm_register_assets() {
         'cgm-gallery-css',
         CGM_PLUGIN_URL . 'assets/css/gallery.css',
         [],
-        '0.1.2'
+        '0.1.4'
     );
 
     wp_register_style(
@@ -73,7 +73,7 @@ function cgm_register_assets() {
         'cgm-gallery-lightbox',
         CGM_PLUGIN_URL . 'assets/js/gallery-lightbox.js',
         [],
-        '0.1.2',
+        '0.1.3',
         true
     );
 
@@ -166,6 +166,28 @@ function cgm_register_gallery_cpt() {
     register_post_type( 'client_gallery', $args );
 }
 add_action( 'init', 'cgm_register_gallery_cpt' );
+
+/**
+ * Register gallery_category taxonomy for client_gallery.
+ */
+function cgm_register_gallery_taxonomy() {
+    register_taxonomy( 'gallery_category', 'client_gallery', [
+        'labels'            => [
+            'name'          => 'Gallery Categories',
+            'singular_name' => 'Gallery Category',
+            'add_new_item'  => 'Add New Gallery Category',
+            'edit_item'     => 'Edit Gallery Category',
+        ],
+        'hierarchical'      => true,
+        'public'            => false,
+        'show_ui'           => true,
+        'show_in_menu'      => true,
+        'show_in_rest'      => true,
+        'show_admin_column' => true,
+        'rewrite'           => false,
+    ] );
+}
+add_action( 'init', 'cgm_register_gallery_taxonomy' );
 
 /**
  * Render Client Gallery content inside the_content so it plays nice with TT5 block templates.
@@ -341,12 +363,20 @@ function cgm_render_client_gallery_content( $content ) {
                                 data-download="<?php echo esc_url( $file['download_url'] ); ?>"
                             <?php endif; ?>
                         >
+                            <?php
+                                $img_w = ! empty( $file['width'] )  ? (int) $file['width']  : 0;
+                                $img_h = ! empty( $file['height'] ) ? (int) $file['height'] : 0;
+                            ?>
                             <img
                                 src="<?php echo esc_url( $file['thumb_url'] ); ?>"
                                 alt="<?php echo esc_attr(
                                     CGM_Gallery_SEO::build_image_alt( $gallery_id, $i + 1, $file )
                                 ); ?>"
                                 loading="lazy"
+                                <?php if ( $img_w && $img_h ) : ?>
+                                    width="<?php echo $img_w; ?>"
+                                    height="<?php echo $img_h; ?>"
+                                <?php endif; ?>
                             />
                         </a>
                     </div>

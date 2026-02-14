@@ -7,7 +7,7 @@
 .cgm-gallery-wrapper {
     --cgm-radius: var(--wp--style--global--border-radius, 6px);
     --cgm-gap: var(--wp--style--block-gap, 1rem);
-    --cgm-tile-bg: #111;
+    --cgm-tile-bg: #131813;
 
     box-sizing: border-box;
     margin-left: auto;
@@ -62,11 +62,9 @@
    --------------------------- */
 
 .cgm-grid {
-    display: grid;
+    columns: 220px;          /* auto-fits as many 220px+ columns as the viewport allows */
+    column-gap: var(--cgm-gap);
     width: 100%;
-    gap: var(--cgm-gap);
-    /* mobile-first: single column */
-    grid-template-columns: 1fr;
 }
 
 .cgm-grid img,
@@ -78,21 +76,13 @@
     -webkit-touch-callout: none;
 }
 
-/* Above ~480px: allow more columns */
-@media (min-width: 480px) {
-    .cgm-grid {
-        grid-template-columns: repeat(
-            auto-fit,
-            minmax(220px, 1fr)
-        );
-    }
-}
-
 /* Each image tile sits fully inside the grid cell */
 .cgm-item {
+    break-inside: avoid;
     overflow: hidden;
     border-radius: var(--cgm-radius);
-    background: #000;
+    background: var(--cgm-tile-bg);
+    margin-bottom: var(--cgm-gap);   /* columns layout doesn't support gap */
     transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -100,15 +90,13 @@
 .cgm-item a {
     display: block;
     width: 100%;
-    height: 100%;
 }
 
-/* Image fills the tile neatly */
+/* Image at native aspect ratio */
 .cgm-item img {
     display: block;
     width: 100%;
-    height: 100%;
-    object-fit: cover;  /* crop nicely inside the box */
+    height: auto;
     border-radius: inherit;
 }
 
@@ -179,13 +167,13 @@
     position: relative;
     aspect-ratio: 4 / 3;
     overflow: hidden;
-    background: #000;
+    background: var(--cgm-tile-bg);
 }
 
 .cgm-gallery-index-image {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
 }
 
