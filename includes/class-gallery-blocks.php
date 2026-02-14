@@ -73,6 +73,7 @@ class CGM_Gallery_Blocks {
                 'order'          => 'DESC',
                 'orderby'        => 'date',
                 'minWidth'       => 220,
+                'gap'            => 16,
             ]
         );
 
@@ -93,9 +94,11 @@ class CGM_Gallery_Blocks {
             $min_width = 220;
         }
 
+        $gap = max(0, (int) $atts['gap'] );
+
         ob_start();
 
-        echo '<div class="cgm-gallery-index-grid" style="--cgm-min-width:' . esc_attr( $min_width ) . 'px">';
+        echo '<div class="cgm-gallery-index-grid" style="--cgm-min-width:' . esc_attr( $min_width ) . 'px; --cgm-gap:' . esc_attr( $gap ) . 'px">';
 
         while ( $query->have_posts() ) {
             $query->the_post();

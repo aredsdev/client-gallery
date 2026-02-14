@@ -42,6 +42,11 @@
                 type: 'number',
                 default: 220,
             },
+
+            gap: {
+                type: 'number',
+                default: 16,
+            }
         },
 
         supports: {
@@ -56,6 +61,7 @@
             const order = attributes.order;
             const orderby = attributes.orderby;
             const minWidth = attributes.minWidth || 220;
+            const gap = (typeof attributes.gap === 'number') ? attributes.gap : 16;4
 
             // Inspector sidebar (Query + Tile width)
             const inspector = el(
@@ -118,6 +124,16 @@
                         },
                         min: 160,
                         max: 480,
+                    }),
+
+                    el(RangeControl, {
+                        label: __('Grid Gap (px)', 'client-gallery'),
+                        value: gap,
+                        onChange: function (value) {
+                            setAttributes({ gap: value });
+                        },
+                        min: 0,
+                        max: 64,
                     })
                 )
             );
@@ -159,7 +175,9 @@
                 'div',
                 {
                     className: 'cgm-gallery-index-grid',
-                    style: { '--cgm-min-width': minWidth + 'px' },
+                    style: { '--cgm-min-width': minWidth + 'px' 
+                        , '--cgm-gap': gap + 'px'
+                    },
                 },
                 sampleTiles
             );
