@@ -133,9 +133,15 @@ client-gallery/
 ---
 
 ## Lightbox
-- Touch swipe left/right to navigate (added to `gallery-lightbox.js`)
 - Keyboard: ESC closes, ArrowLeft/ArrowRight navigates
-- `showImageForIndex()` wraps around at ends
+- Touch swipe left/right to navigate (passive listeners, 50px threshold)
+- **Carousel animation:** fade + 60px translate, 0.2s, driven by CSS keyframes in `lightbox.css`
+  - `showImageForIndex(index, direction)` — `direction` is `'next'`/`'prev'`; omit for instant (first open)
+  - `applyImageForIndex(index)` — pure src + download-button update, no animation
+  - `isAnimating` guard prevents queuing rapid clicks mid-animation
+  - Out-animation class (`forwards` fill) keeps image at `opacity:0` while new src loads
+  - Slide-in starts only after `load`/`error` fires (or `imageEl.complete` if cached) — no flash
+  - `closeLightbox()` strips all four animation classes and resets `isAnimating`
 
 ---
 

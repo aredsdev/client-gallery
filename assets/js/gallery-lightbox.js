@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!triggers.length) return;
 
     let currentIndex = -1;
+    let isAnimating  = false;
 
     function deriveDownloadUrlFromThumbUrl(url) {
         try {
@@ -45,23 +46,12 @@ document.addEventListener('DOMContentLoaded', function () {
         return '';
     }
 
-
-    function showImageForIndex(index) {
-        const count = triggers.length;
-        if (!count) return;
-
-        // Wrap around
-        if (index < 0) {
-            index = count - 1;
-        } else if (index >= count) {
-            index = 0;
-        }
-
-        currentIndex = index;
-        const trigger = triggers[currentIndex];
+    // Applies src + download state for the given (already-normalised) index.
+    // Does NOT touch currentIndex — caller is responsible.
+    function applyImageForIndex(index) {
+        const trigger  = triggers[index];
         const thumbUrl = trigger.dataset.thumb || trigger.href;
 
-        // Always show the image from the thumb URL
         if (thumbUrl) {
             imageEl.src = thumbUrl;
         } else {
@@ -75,9 +65,9 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         // Check download lock state (set by your PHP data attributes)
-        const modal = document.getElementById('cgm-download-password-modal');
+        const modal      = document.getElementById('cgm-download-password-modal');
         const requiresPw = modal && modal.dataset.cgmRequiresPassword === '1';
-        const unlocked = modal && modal.dataset.cgmDownloadUnlocked === '1';
+        const unlocked   = modal && modal.dataset.cgmDownloadUnlocked === '1';
 
         if (downloadUrl) {
             if (requiresPw && !unlocked) {
@@ -101,8 +91,69 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function showImageForIndex(index, direction) {
+        const count = triggers.length;
+        if (!count) return;
+
+        // Wrap around
+        if (index < 0) {
+            index = count - 1;
+        } else if (index >= count) {
+            index = 0;
+        }
+
+        // No direction = instant update (first open)
+        if (!direction) {
+            currentIndex = index;
+            applyImageForIndex(index);
+            return;
+        }
+
+        // Guard against rapid clicks during animation
+        if (isAnimating) return;
+        isAnimating = true;
+
+        const outClass = direction === 'next' ? 'cgm-slide-out-left'  : 'cgm-slide-out-right';
+        const inClass  = direction === 'next' ? 'cgm-slide-in-right'  : 'cgm-slide-in-left';
+
+        imageEl.classList.add(outClass);
+
+        imageEl.addEventListener('animationend', function onOut() {
+            imageEl.removeEventListener('animationend', onOut);
+            // Keep outClass (forwards fill = opacity:0) until new image is ready.
+
+            currentIndex = index;
+            applyImageForIndex(index); // sets imageEl.src
+
+            function startInAnimation() {
+                // Atomically swap: remove the out-hold, start the in-animation.
+                imageEl.classList.remove(outClass);
+                imageEl.classList.add(inClass);
+                imageEl.addEventListener('animationend', function onIn() {
+                    imageEl.removeEventListener('animationend', onIn);
+                    imageEl.classList.remove(inClass);
+                    isAnimating = false;
+                });
+            }
+
+            // Wait for the new image to be decoded before sliding in.
+            // If already cached, imageEl.complete + naturalWidth > 0 is true immediately.
+            if (imageEl.complete && imageEl.naturalWidth > 0) {
+                startInAnimation();
+            } else {
+                function onLoaded() {
+                    imageEl.removeEventListener('load',  onLoaded);
+                    imageEl.removeEventListener('error', onLoaded);
+                    startInAnimation();
+                }
+                imageEl.addEventListener('load',  onLoaded);
+                imageEl.addEventListener('error', onLoaded); // slide in even on error
+            }
+        });
+    }
+
     function openLightboxAt(index) {
-        showImageForIndex(index);
+        showImageForIndex(index); // no direction — instant, no animation on first open
         overlay.removeAttribute('hidden');
         overlay.classList.add('is-visible');
         document.body.classList.add('cgm-lightbox-open');
@@ -112,6 +163,12 @@ document.addEventListener('DOMContentLoaded', function () {
         overlay.classList.remove('is-visible');
         overlay.setAttribute('hidden', 'hidden');
         document.body.classList.remove('cgm-lightbox-open');
+        // Clean up any in-flight animation state
+        imageEl.classList.remove(
+            'cgm-slide-out-left', 'cgm-slide-out-right',
+            'cgm-slide-in-right', 'cgm-slide-in-left'
+        );
+        isAnimating = false;
         imageEl.src = '';
         currentIndex = -1;
     }
@@ -147,7 +204,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (currentIndex === -1) {
                 openLightboxAt(0);
             } else {
-                showImageForIndex(currentIndex - 1);
+                showImageForIndex(currentIndex - 1, 'prev');
             }
         });
     }
@@ -158,7 +215,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (currentIndex === -1) {
                 openLightboxAt(0);
             } else {
-                showImageForIndex(currentIndex + 1);
+                showImageForIndex(currentIndex + 1, 'next');
             }
         });
     }
@@ -175,7 +232,8 @@ document.addEventListener('DOMContentLoaded', function () {
         var dx = e.changedTouches[0].clientX - touchStartX;
         var dy = e.changedTouches[0].clientY - touchStartY;
         if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
-            showImageForIndex(currentIndex + (dx < 0 ? 1 : -1));
+            var dir = dx < 0 ? 'next' : 'prev';
+            showImageForIndex(currentIndex + (dx < 0 ? 1 : -1), dir);
         }
     }, { passive: true });
 
@@ -191,14 +249,14 @@ document.addEventListener('DOMContentLoaded', function () {
             if (currentIndex === -1) {
                 openLightboxAt(0);
             } else {
-                showImageForIndex(currentIndex - 1);
+                showImageForIndex(currentIndex - 1, 'prev');
             }
         } else if (e.key === 'ArrowRight') {
             e.preventDefault();
             if (currentIndex === -1) {
                 openLightboxAt(0);
             } else {
-                showImageForIndex(currentIndex + 1);
+                showImageForIndex(currentIndex + 1, 'next');
             }
         }
     });
@@ -210,4 +268,3 @@ document.addEventListener('contextmenu', function (e) {
         e.preventDefault();
     }
 });
-

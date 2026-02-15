@@ -59,7 +59,7 @@ function cgm_register_assets() {
         'cgm-lightbox-css',
         CGM_PLUGIN_URL . 'assets/css/lightbox.css',
         [],
-        '0.1.16'
+        '0.1.17'
     );
 
     wp_register_style(
@@ -73,7 +73,7 @@ function cgm_register_assets() {
         'cgm-gallery-lightbox',
         CGM_PLUGIN_URL . 'assets/js/gallery-lightbox.js',
         [],
-        '0.1.3',
+        '0.1.6',
         true
     );
 

@@ -193,3 +193,29 @@ body.cgm-lightbox-open {
         max-height: calc(100vh - 7rem) !important; /* viewport minus padding/button area */
     }
 }
+
+/* ---------------------------
+   Carousel slide animations
+   --------------------------- */
+
+@keyframes cgm-slide-out-left {
+    from { opacity: 1; transform: translateX(0);     }
+    to   { opacity: 0; transform: translateX(-60px); }
+}
+@keyframes cgm-slide-in-right {
+    from { opacity: 0; transform: translateX(60px);  }
+    to   { opacity: 1; transform: translateX(0);     }
+}
+@keyframes cgm-slide-out-right {
+    from { opacity: 1; transform: translateX(0);     }
+    to   { opacity: 0; transform: translateX(60px);  }
+}
+@keyframes cgm-slide-in-left {
+    from { opacity: 0; transform: translateX(-60px); }
+    to   { opacity: 1; transform: translateX(0);     }
+}
+
+#cgm-lightbox-image.cgm-slide-out-left  { animation: cgm-slide-out-left  0.2s ease forwards; }
+#cgm-lightbox-image.cgm-slide-in-right  { animation: cgm-slide-in-right  0.2s ease forwards; }
+#cgm-lightbox-image.cgm-slide-out-right { animation: cgm-slide-out-right 0.2s ease forwards; }
+#cgm-lightbox-image.cgm-slide-in-left   { animation: cgm-slide-in-left   0.2s ease forwards; }
