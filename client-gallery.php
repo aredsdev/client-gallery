@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Client Gallery Manager
  * Description: Private client galleries stored outside the Media Library with thumbnails and secure downloads.
- * Version: 0.1.2
+ * Version: 0.2.0
  * Author: Allen Redshaw
  */
 
@@ -30,6 +30,7 @@ require_once CGM_PLUGIN_PATH . 'includes/class-gallery-download.php';
 require_once CGM_PLUGIN_PATH . 'includes/class-gallery-admin.php';
 require_once CGM_PLUGIN_PATH . 'includes/class-gallery-blocks.php';
 require_once CGM_PLUGIN_PATH . 'includes/class-gallery-seo.php';
+require_once CGM_PLUGIN_PATH . 'includes/class-gallery-sitemap.php';
 
 /**
  * Initialize components on plugin load.
@@ -41,6 +42,7 @@ function cgm_init_plugin() {
     CGM_Gallery_Blocks::init();
     CGM_Gallery_SEO::init();
     CGM_Gallery_Storage::init();
+    CGM_Gallery_Sitemap::init();
 }
 add_action( 'plugins_loaded', 'cgm_init_plugin' );
 
@@ -66,7 +68,7 @@ function cgm_register_assets() {
         'cgm-password-modal-css',
         CGM_PLUGIN_URL . 'assets/css/password-modal.css',
         ['cgm-gallery-css', 'cgm-lightbox-css'],
-        '0.1.0'
+        '0.1.1'
     );
 
     wp_register_script(
@@ -472,6 +474,11 @@ function cgm_render_client_gallery_content( $content ) {
                     </button>
                 </p>
             </form>
+
+            <p class="cgm-modal-licensing">
+                <?php esc_html_e( 'Need these images for commercial or editorial use?', 'client-gallery' ); ?>
+                <a href="/contact/"><?php esc_html_e( 'Contact us about licensing.', 'client-gallery' ); ?></a>
+            </p>
         </div>
     </div>
 

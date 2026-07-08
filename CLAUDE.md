@@ -1,4 +1,17 @@
+---
+tags:
+  - dev/wp-plugins
+type: index
+updated: 2026-07-02
+---
+
 # Client Gallery Plugin — Claude Context
+
+**Used on:** [[dev/websites/parfocal/CLAUDE|parfocal]] (parfocalmedia.ca) — confirmed active on the live server, but on the **old pre-migration path** (`/var/www/parfocalmedia/`, not the per-user-isolated `/var/www/homes/parfocalmedia/` the rest of the migration uses — see [[projects|dev/server projects]]).
+
+**Version reconciled 2026-07-08 (the 2026-07-02 "local ahead of live" claim was backwards):** md5-compared every file live-vs-local — all includes were identical; the only drift was live having a hot-edited licensing paragraph in the download modal (+ a css cache-bust bump) that had never been pulled back into this repo. That edit is now committed here, and 0.2.0 deployed live. Live and local are in sync.
+
+**User note (2026-07-02):** this plugin is more complex than the others — the gallery/download functionality spills out of the normal WP-plugin environment into what's effectively a standalone server-side app (external file storage at `/var/www/client_galleries/`, its own password/token system, ZIP streaming, etc. — see Storage Layout and Two-Tier Password System below). Expect ongoing changes here; treat this one as a live project, not a settled utility like the others in [[dev/wp-plugins/CLAUDE|dev/wp-plugins]].
 
 ## Project Overview
 WordPress plugin for managing private, secure image galleries for clients.
@@ -6,7 +19,7 @@ Images are stored **outside** the media library at `/var/www/client_galleries/`.
 
 - **Plugin slug:** `client-gallery`
 - **Custom post type:** `client_gallery`
-- **Version:** 0.1.5
+- **Version:** 0.2.0 (deployed live 2026-07-08)
 - **Author:** Allen Redshaw
 
 ---
@@ -22,7 +35,8 @@ client-gallery/
 │   ├── class-gallery-blocks.php    # Gutenberg block (client-gallery/index)
 │   ├── class-gallery-download.php  # Single image + bulk ZIP download endpoints
 │   ├── class-gallery-seo.php       # Robots meta, canonical, ALT text, JSON-LD ImageObject, OG tags
-│   └── class-gallery-storage.php   # Image I/O, WebP thumbnail gen, watermarking, dimensions
+│   ├── class-gallery-sitemap.php   # /cgm-images.xml image sitemap (public galleries only)
+│   └── class-gallery-storage.php   # Image I/O, WebP thumbnail gen, watermarking, dimensions, JPEG og:image variant
 ├── assets/
 │   ├── css/
 │   │   ├── gallery.css             # CSS columns masonry grid + index block layout
@@ -173,9 +187,13 @@ client-gallery/
 ---
 
 ## OG Image Serving — Confirmed Working
-The OG image URL (`?cgm_thumb=1&gallery_id=X&file=cover.jpg`) serves from `thumbs/cover.jpg.webp`
-as `Content-Type: image/webp`. The `.webp` extension does not appear in the URL — expected.
-**Do NOT serve originals through the thumb endpoint.**
+OG/Twitter image URLs now carry `&format=jpg` (added 2026-07-08): the thumb endpoint converts
+the watermarked WebP thumb to a JPEG on first request (cached on disk as `{thumb}.webp.jpg`)
+and serves `Content-Type: image/jpeg`. **This was the "Facebook bug":** Facebook's link-preview
+crawler does not render WebP og:images, so any gallery relying on the cgm_thumb cover fallback
+(no featured image) shared with no preview image at all. Confirmed fixed live via curl as
+`facebookexternalhit/1.1` — real JPEG bytes now come back. On-page `<img>` tags still use the
+smaller WebP (no format param). **Do NOT serve originals through the thumb endpoint.**
 
 ---
 
@@ -188,10 +206,26 @@ as `Content-Type: image/webp`. The `.webp` extension does not appear in the URL 
 - ✅ `Cache-Control: public` for public thumbnails; `private, no-store` for private
 - ✅ `<img width height>` attributes from `getimagesize()` on WebP thumbs — eliminates CLS
 
+## Image Sitemap (class-gallery-sitemap.php, added 2026-07-08)
+- URL: `https://parfocalmedia.ca/cgm-images.xml` (+ `/?cgm_image_sitemap=1` fallback)
+- Lists every **public** published gallery page with one `<image:image>` per photo,
+  using the exact same WebP `?cgm_thumb` URLs as the on-page `<img>` tags.
+  Private galleries fully excluded (verified live: 15 galleries, 2,317 images, 0 private leaked).
+- **Filename gotcha:** must NOT end in `-sitemap.xml` — Yoast's rewrite
+  `([^/]+?)-sitemap([0-9]+)?\.xml$` swallows any such URL first (found live: the original
+  `/cgm-image-sitemap.xml` 404'd through Yoast).
+- Submitted to GSC 2026-07-08 via the API (`sc-domain:parfocalmedia.ca`). **Why it matters,
+  from real GSC data:** in the 90 days before this, individual gallery pages had essentially
+  zero Google Images impressions (index page: 2) while service pages got hundreds — the
+  watermarked images served fine to Googlebot but were never discovered at scale.
+- The `robots_txt` filter appends the Sitemap line only to WP-*generated* robots.txt;
+  parfocal has a physical/custom robots.txt so that filter is inert there — GSC submission
+  covers Google; add the line to the real robots.txt manually if Bing ever matters.
+
 ## Pending / Future
-- ⏳ Image sitemap
 - ⏳ Zero-padded Lightroom filenames for correct `scandir()` sort order
 - ⏳ Theme colour picker for tile bg not pulling child-theme palette correctly (investigate `withSelect` + `core/block-editor` store timing)
+- ⏳ Watch GSC over the next 2-4 weeks: image sitemap processing status + whether gallery pages start earning Google Images impressions (compare against the ~zero baseline above)
 
 ---
 

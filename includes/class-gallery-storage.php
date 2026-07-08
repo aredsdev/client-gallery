@@ -27,6 +27,11 @@ class CGM_Gallery_Storage {
      *
      * URL format:
      *   /?cgm_thumb=1&gallery_id=123&file=image.jpg
+     *   /?cgm_thumb=1&gallery_id=123&file=image.jpg&format=jpg
+     *
+     * format=jpg serves a JPEG variant of the thumb. Facebook's link-preview
+     * crawler does not render WebP og:images, so OG tags point here with
+     * format=jpg while on-page <img> tags keep the smaller WebP.
      */
     public static function handle_thumb_request() {
         if ( empty( $_GET['cgm_thumb'] ) ) {
@@ -34,6 +39,7 @@ class CGM_Gallery_Storage {
         }
 
         $gallery_id = isset( $_GET['gallery_id'] ) ? (int) $_GET['gallery_id'] : 0;
+        $want_jpeg  = isset( $_GET['format'] ) && $_GET['format'] === 'jpg';
 
         // Do NOT sanitize into a different filename; decode and basename it safely.
         $file = isset( $_GET['file'] ) ? (string) wp_unslash( $_GET['file'] ) : '';
@@ -79,7 +85,18 @@ class CGM_Gallery_Storage {
             && method_exists( 'CGM_Gallery_Access', 'gallery_is_private' )
             && CGM_Gallery_Access::gallery_is_private( $gallery_id );
 
-        header( 'Content-Type: image/webp' );
+        $content_type = 'image/webp';
+
+        if ( $want_jpeg ) {
+            $jpeg = self::get_jpeg_variant( $thumb );
+            if ( $jpeg ) {
+                $thumb        = $jpeg;
+                $content_type = 'image/jpeg';
+            }
+            // On conversion failure fall through and serve the WebP.
+        }
+
+        header( 'Content-Type: ' . $content_type );
         header( 'Content-Length: ' . (string) filesize( $thumb ) );
         header( $is_private
             ? 'Cache-Control: private, no-store'
@@ -88,6 +105,36 @@ class CGM_Gallery_Storage {
 
         readfile( $thumb );
         exit;
+    }
+
+    /**
+     * Get (or lazily create) a JPEG variant of a WebP thumb, cached on disk
+     * next to the WebP as {thumb}.jpg. Watermark is already baked into the
+     * WebP source, so the JPEG inherits it.
+     *
+     * @param string $webp_path Absolute path to the existing .webp thumb.
+     * @return string|false Absolute path to the JPEG, or false on failure.
+     */
+    protected static function get_jpeg_variant( $webp_path ) {
+        $jpeg_path = $webp_path . '.jpg';
+
+        if ( file_exists( $jpeg_path ) ) {
+            return $jpeg_path;
+        }
+
+        if ( ! function_exists( 'imagecreatefromwebp' ) ) {
+            return false;
+        }
+
+        $src = @imagecreatefromwebp( $webp_path );
+        if ( ! $src ) {
+            return false;
+        }
+
+        $ok = imagejpeg( $src, $jpeg_path, 85 );
+        imagedestroy( $src );
+
+        return $ok ? $jpeg_path : false;
     }
 
 

@@ -256,6 +256,7 @@ class CGM_Gallery_SEO {
         }
 
         // Build the cover image thumbnail URL (public for public galleries).
+        // format=jpg: Facebook's crawler doesn't render WebP og:images.
         $cover_url  = '';
         $cover_base = get_post_meta( $gallery_id, '_cgm_cover_image', true );
 
@@ -264,6 +265,7 @@ class CGM_Gallery_SEO {
                 'cgm_thumb'  => 1,
                 'gallery_id' => $gallery_id,
                 'file'       => $cover_base,
+                'format'     => 'jpg',
             ], home_url( '/' ) );
         }
 
@@ -337,10 +339,12 @@ class CGM_Gallery_SEO {
             return;
         }
 
+        // format=jpg: Facebook's crawler doesn't render WebP og:images.
         $cover_url = add_query_arg( [
             'cgm_thumb'  => 1,
             'gallery_id' => $gallery_id,
             'file'       => $cover_base,
+            'format'     => 'jpg',
         ], home_url( '/' ) );
 
         $image_container->add_image_by_url( $cover_url );
