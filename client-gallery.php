@@ -99,7 +99,7 @@ function cgm_register_assets() {
         'cgm-gallery-analytics',
         CGM_PLUGIN_URL . 'assets/js/gallery-analytics.js',
         [],
-        '0.1.0',
+        '0.1.1',
         true
     );
 
@@ -406,7 +406,7 @@ function cgm_render_client_gallery_content( $content ) {
             echo '<p>' . esc_html__( 'No images in this gallery yet.', 'client-gallery' ) . '</p>';
         else :
             ?>
-            <div class="cgm-grid">
+            <div class="cgm-grid" data-cgm-total="<?php echo (int) count( $files ); ?>">
                 <?php foreach ( $files as $i => $file ) : ?>
                     <div class="cgm-item">
                         <a

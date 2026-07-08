@@ -5,13 +5,15 @@
  * falling back to a dataLayer push for GTM — same site-agnostic pattern
  * as the Forminator bridge tag. No IDs are hardcoded here.
  *
- * Events:
- *   gallery_image_view    - an image shown full-size in the lightbox
- *                           (open + every next/prev/swipe/keyboard nav)
- *   gallery_image_download- single image download click
- *   gallery_zip_download  - "Download all as ZIP" click
- *
- * All events carry gallery_slug + gallery_id; image events carry image_file.
+ * Events (all carry gallery_slug + gallery_id; image events also carry
+ * image_file, image_index, total_images so view-depth is visible):
+ *   gallery_image_view     - an image shown full-size in the lightbox
+ *                            (open + every next/prev/swipe/keyboard nav)
+ *   gallery_image_download - single image download
+ *   gallery_zip_download   - "Download all as ZIP"
+ *   gallery_unlock         - correct password entered {unlock_scope: view|download}
+ *   gallery_unlock_failed  - wrong password {unlock_scope: view|download}
+ *   gallery_share          - share button used {share_method: native|copy_link|facebook}
  */
 (function () {
     'use strict';
@@ -19,6 +21,8 @@
     var settings = window.cgmAnalyticsSettings || {};
     var gallerySlug = settings.gallerySlug || '';
     var galleryId = settings.galleryId || 0;
+
+    var VIEW_UNLOCK_FLAG = 'cgm_unlock_view_' + galleryId;
 
     function track(name, params) {
         params = params || {};
@@ -43,6 +47,83 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        var grid = document.querySelector('.cgm-grid');
+        var totalImages = grid ? parseInt(grid.getAttribute('data-cgm-total') || '0', 10) : 0;
+
+        // Map thumb URL -> 1-based position, for view-depth on image events.
+        var indexByThumb = {};
+        var triggers = document.querySelectorAll('.cgm-lightbox-trigger');
+        for (var i = 0; i < triggers.length; i++) {
+            var t = triggers[i].getAttribute('data-thumb') || triggers[i].getAttribute('href') || '';
+            if (t) {
+                indexByThumb[t] = i + 1;
+            }
+        }
+
+        function imageParams(url) {
+            var params = { image_file: fileFromUrl(url) };
+            if (indexByThumb[url]) {
+                params.image_index = indexByThumb[url];
+            }
+            if (totalImages) {
+                params.total_images = totalImages;
+            }
+            return params;
+        }
+
+        // --- View-password unlock outcome. The submit handler below flags
+        // the attempt in sessionStorage; the resulting page load either
+        // shows the grid (success) or the form again (wrong password).
+        try {
+            if (sessionStorage.getItem(VIEW_UNLOCK_FLAG)) {
+                sessionStorage.removeItem(VIEW_UNLOCK_FLAG);
+                if (grid) {
+                    track('gallery_unlock', { unlock_scope: 'view' });
+                } else if (document.querySelector('.cgm-gallery-password-wrap')) {
+                    track('gallery_unlock_failed', { unlock_scope: 'view' });
+                }
+            }
+        } catch (e) {
+            // sessionStorage unavailable (rare) — skip unlock tracking.
+        }
+
+        var viewForm = document.querySelector('.cgm-gallery-password-wrap form');
+        if (viewForm) {
+            viewForm.addEventListener('submit', function () {
+                try {
+                    sessionStorage.setItem(VIEW_UNLOCK_FLAG, '1');
+                } catch (e) {}
+            });
+        }
+
+        // --- Download-password unlock. Success 302s straight into the file
+        // (no page reload), so fire at submit time with beacon transport and
+        // credit the intended download too; a wrong password re-renders the
+        // page with the error attribute, which nets out as unlock_failed.
+        var dlModal = document.getElementById('cgm-download-password-modal');
+
+        if (dlModal && dlModal.getAttribute('data-cgm-download-error') === '1') {
+            track('gallery_unlock_failed', { unlock_scope: 'download' });
+        }
+
+        var dlForm = dlModal ? dlModal.querySelector('form') : null;
+        if (dlForm) {
+            dlForm.addEventListener('submit', function () {
+                track('gallery_unlock', { unlock_scope: 'download', transport_type: 'beacon' });
+
+                var intended = document.getElementById('cgm_download_redirect');
+                var url = intended ? intended.value : '';
+                if (url.indexOf('cgm_download_all') !== -1) {
+                    track('gallery_zip_download', { via_unlock: 1, transport_type: 'beacon' });
+                } else if (url.indexOf('cgm_download') !== -1) {
+                    var p = imageParams(url);
+                    p.via_unlock = 1;
+                    p.transport_type = 'beacon';
+                    track('gallery_image_download', p);
+                }
+            });
+        }
+
         // --- Image views: watch the lightbox image's src. One observer
         // covers open, arrows, keyboard, and swipe navigation alike.
         var lightboxImage = document.getElementById('cgm-lightbox-image');
@@ -55,32 +136,42 @@
                     return;
                 }
                 lastTrackedSrc = src;
-                track('gallery_image_view', { image_file: fileFromUrl(src) });
+                track('gallery_image_view', imageParams(src));
             }).observe(lightboxImage, { attributes: true, attributeFilter: ['src'] });
         }
 
-        // --- Downloads: delegate clicks, split single vs ZIP by the href.
+        // --- Clicks: downloads (direct, unlocked state) + share buttons.
         document.addEventListener('click', function (event) {
-            var link = event.target && event.target.closest
-                ? event.target.closest('a.cgm-download-trigger')
-                : null;
+            if (!event.target || !event.target.closest) {
+                return;
+            }
 
+            var share = event.target.closest('.cgm-share-trigger, .cgm-copy-link, .cgm-share-facebook');
+            if (share) {
+                var method = share.classList.contains('cgm-share-facebook') ? 'facebook'
+                    : share.classList.contains('cgm-copy-link') ? 'copy_link'
+                    : 'native';
+                track('gallery_share', { share_method: method });
+                return;
+            }
+
+            var link = event.target.closest('a.cgm-download-trigger');
             if (!link) {
                 return;
             }
 
             var href = link.getAttribute('href') || '';
 
-            // Locked state links to '#' (password modal intercepts) — the
-            // unlocked click that follows will be counted instead.
+            // Locked state links to '#' (password modal intercepts) — that
+            // flow is counted by the modal submit handler above instead.
             if (href === '#' || href === '') {
                 return;
             }
 
             if (href.indexOf('cgm_download_all') !== -1) {
-                track('gallery_zip_download', {});
+                track('gallery_zip_download', totalImages ? { total_images: totalImages } : {});
             } else if (href.indexOf('cgm_download') !== -1) {
-                track('gallery_image_download', { image_file: fileFromUrl(href) });
+                track('gallery_image_download', imageParams(href));
             }
         });
     });
