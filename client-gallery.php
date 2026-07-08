@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Client Gallery Manager
  * Description: Private client galleries stored outside the Media Library with thumbnails and secure downloads.
- * Version: 0.3.0
+ * Version: 0.3.1
  * Author: Allen Redshaw
  */
 
@@ -95,6 +95,14 @@ function cgm_register_assets() {
         true
     );
 
+    wp_register_script(
+        'cgm-gallery-analytics',
+        CGM_PLUGIN_URL . 'assets/js/gallery-analytics.js',
+        [],
+        '0.1.0',
+        true
+    );
+
 }
 add_action( 'init', 'cgm_register_assets' );
 
@@ -112,6 +120,16 @@ function cgm_enqueue_frontend_assets() {
         wp_enqueue_script( 'cgm-gallery-lightbox' );
         wp_enqueue_script( 'cgm-password-modal-js' );
         wp_enqueue_script( 'cgm-gallery-share' );
+        wp_enqueue_script( 'cgm-gallery-analytics' );
+
+        wp_localize_script(
+            'cgm-gallery-analytics',
+            'cgmAnalyticsSettings',
+            [
+                'gallerySlug' => get_post_field( 'post_name', get_queried_object_id() ),
+                'galleryId'   => get_queried_object_id(),
+            ]
+        );
 
 
         // Pass DOWNLOAD password state into JS so it knows when to intercept clicks.

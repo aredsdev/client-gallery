@@ -19,7 +19,7 @@ Images are stored **outside** the media library at `/var/www/client_galleries/`.
 
 - **Plugin slug:** `client-gallery`
 - **Custom post type:** `client_gallery`
-- **Version:** 0.3.0 (deployed live 2026-07-08)
+- **Version:** 0.3.1 (deployed live 2026-07-08)
 - **Author:** Allen Redshaw
 
 ---
@@ -46,6 +46,7 @@ client-gallery/
 │       ├── gallery-lightbox.js     # Lightbox interaction, keyboard nav, touch swipe
 │       ├── gallery-share.js        # Web Share API + clipboard fallback
 │       ├── password-modal.js       # Download password modal logic
+│       ├── gallery-analytics.js    # GA4 events: image views + downloads
 │       └── block-client-gallery-index.js  # Gutenberg block editor JS
 └── fonts/
     └── JosefinSans-VariableFont_wght.ttf  # Used for watermarks
@@ -260,6 +261,24 @@ smaller WebP (no format param). **Do NOT serve originals through the thumb endpo
 - The `robots_txt` filter appends the Sitemap line only to WP-*generated* robots.txt;
   parfocal has a physical/custom robots.txt so that filter is inert there — GSC submission
   covers Google; add the line to the real robots.txt manually if Bing ever matters.
+
+## GA4 analytics (gallery-analytics.js, added 2026-07-08)
+Events fire through the page's own `gtag()` (Site Kit loads it site-wide), dataLayer
+fallback for GTM — same no-hardcoded-ID pattern as the Forminator bridge:
+- `gallery_image_view` — every image shown full-size in the lightbox. One
+  MutationObserver on the lightbox `<img>` src catches open + arrows + keyboard +
+  swipe uniformly.
+- `gallery_image_download` / `gallery_zip_download` — download clicks, split by URL.
+  Locked-state clicks (href="#", password modal) are ignored; the post-unlock click
+  is the one counted.
+- All events carry `gallery_slug` + `gallery_id` (via `wp_localize_script`).
+- Outbound share URLs were ALREADY UTM-tagged (`utm_campaign=gallery_share`,
+  `utm_content={slug}`) — that existed before this.
+- **Verified deployed** (script + settings in live HTML, via Autoptimize bundles) but
+  **live event flow not yet verified** — needs a real browser visit; check GA4
+  Realtime (`run_realtime_report` on eventName) while someone browses a gallery.
+  To make these show as metrics in standard reports later, register `gallery_slug`
+  as a custom dimension in GA4 Admin (not done — events collect fine without it).
 
 ## Pending / Future
 - ⏳ Zero-padded Lightroom filenames for correct `scandir()` sort order
