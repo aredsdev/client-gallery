@@ -16,10 +16,92 @@ class CGM_Gallery_Storage {
     const WATERMARK_TEXT = 'Parfocal Media';
 
     /**
+     * Option: directory of the server-side cgm-thumbd install.
+     * When the service is active, ALL thumbnail generation happens there —
+     * bulk in-PHP generation pegged PHP-FPM and took the site down.
+     */
+    const OPTION_SERVICE_DIR  = 'cgm_thumb_service_dir';
+    const SERVICE_FRESH_SECS  = 300;
+
+    /**
      * Boot storage-layer front-end endpoints.
      */
     public static function init() {
         add_action( 'template_redirect', [ __CLASS__, 'handle_thumb_request' ] );
+    }
+
+    /* ---------------------------------------------------------------------
+     * Server-side thumbnail service (cgm-thumbd) integration
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Configured service directory ('' = feature off, pure in-plugin mode).
+     */
+    public static function service_dir() {
+        $dir = trim( (string) get_option( self::OPTION_SERVICE_DIR, '' ) );
+        return $dir !== '' ? untrailingslashit( $dir ) : '';
+    }
+
+    /**
+     * Is the server-side thumbnail service alive?
+     *
+     * "Alive" = its status.json heartbeat was written in the last 5 minutes.
+     * If the service dies, the plugin automatically falls back to in-PHP
+     * generation, so galleries keep working (just at the old perf cost).
+     */
+    public static function service_active() {
+        $dir = self::service_dir();
+        if ( ! $dir ) {
+            return false;
+        }
+
+        $status = $dir . '/status.json';
+        if ( ! is_readable( $status ) ) {
+            return false;
+        }
+
+        $mtime = @filemtime( $status );
+
+        return $mtime && ( time() - $mtime ) < self::SERVICE_FRESH_SECS;
+    }
+
+    /**
+     * Read the service's status.json (for the admin settings page).
+     */
+    public static function service_status() {
+        $dir = self::service_dir();
+        if ( ! $dir ) {
+            return null;
+        }
+
+        $raw = @file_get_contents( $dir . '/status.json' );
+        if ( ! $raw ) {
+            return null;
+        }
+
+        $data = json_decode( $raw, true );
+
+        return is_array( $data ) ? $data : null;
+    }
+
+    /**
+     * Ask the service to prioritize a gallery (touch a queue file).
+     */
+    public static function enqueue_for_service( $gallery_id ) {
+        $dir = self::service_dir();
+        if ( ! $dir ) {
+            return false;
+        }
+
+        $paths  = self::get_gallery_paths( $gallery_id );
+        $folder = basename( $paths['base'] );
+        $queue  = $dir . '/queue';
+
+        if ( ! is_dir( $queue ) && ! wp_mkdir_p( $queue ) ) {
+            return false;
+        }
+
+        return (bool) @touch( $queue . '/' . $folder );
     }
 
     /**
@@ -306,7 +388,13 @@ class CGM_Gallery_Storage {
             );
         }
 
-        // Make thumbnail.
+        // Make thumbnail — via the server service when it's alive,
+        // inline in PHP only as fallback.
+        if ( self::service_active() ) {
+            self::enqueue_for_service( $gallery_id );
+            return true;
+        }
+
         $thumbs_dir = trailingslashit( $paths['thumbs'] );
         $thumb_path = $thumbs_dir . $candidate . '.webp';
 
@@ -493,7 +581,8 @@ class CGM_Gallery_Storage {
             return [];
         }
 
-        $out = [];
+        $out              = [];
+        $service_enqueued = false;
 
         foreach ( $list as $file ) {
             if ( $file === '.' || $file === '..' ) {
@@ -508,8 +597,19 @@ class CGM_Gallery_Storage {
             $thumb_file = $file . '.webp';
             $thumb_full = $thumbs . $thumb_file;
 
-            // If thumbnail doesn't exist yet, try generating it now.
+            // If thumbnail doesn't exist yet: hand it to the server service
+            // when active (the image appears on the next service pass, ≤60s)
+            // — never bulk-generate inside a front-end PHP request. Inline
+            // generation only remains as the no-service fallback.
             if ( ! file_exists( $thumb_full ) ) {
+                if ( self::service_active() ) {
+                    if ( ! $service_enqueued ) {
+                        self::enqueue_for_service( $gallery_id );
+                        $service_enqueued = true;
+                    }
+                    continue; // skip this image until its thumb exists
+                }
+
                 $thumb_result = self::generate_thumbnail( $full, $thumb_full );
                 if ( is_wp_error( $thumb_result ) ) {
                     error_log( 'CGM thumbnail regeneration error: ' . $thumb_result->get_error_message() );
@@ -576,6 +676,15 @@ class CGM_Gallery_Storage {
         $ensure = self::ensure_gallery_dirs( $gallery_id );
         if ( is_wp_error( $ensure ) ) {
             return 0;
+        }
+
+        // Server service handles bulk generation — this exact code path
+        // (Sync button after a big FTP upload) is what used to take the
+        // site down when it ran inside PHP-FPM. Returns -1 so the admin
+        // notice can say "queued" instead of a thumb count.
+        if ( self::service_active() ) {
+            self::enqueue_for_service( $gallery_id );
+            return -1;
         }
 
         if ( ! is_dir( $orig ) ) {

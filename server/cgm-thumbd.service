@@ -1,0 +1,12 @@
+[Unit]
+Description=Client Gallery thumbnail generator (one pass)
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/cgm-thumbd
+ExecStart=/usr/bin/python3 /opt/cgm-thumbd/cgm_thumbd.py --once
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle

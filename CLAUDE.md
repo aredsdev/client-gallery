@@ -19,7 +19,7 @@ Images are stored **outside** the media library at `/var/www/client_galleries/`.
 
 - **Plugin slug:** `client-gallery`
 - **Custom post type:** `client_gallery`
-- **Version:** 0.2.0 (deployed live 2026-07-08)
+- **Version:** 0.3.0 (deployed live 2026-07-08)
 - **Author:** Allen Redshaw
 
 ---
@@ -73,6 +73,20 @@ client-gallery/
 - Cookie tokens signed with `hash_hmac('sha256', ..., wp_salt())`
 - Tokens expire after 1 day
 
+### URL grants (Meta in-app browser fix, 2026-07-08)
+**This was the real "Facebook bug":** Meta's in-app browser (FB/IG WebView) drops
+`Set-Cookie` on the 302 redirect after a successful password POST, so users entered a
+correct password and were immediately denied again — Meta browser only. Fix: the
+redirect now also carries a signed, short-lived grant in the URL (`?cgm_grant=` for
+view, `cgm_grant_dl=` for download; format `{expiry}.{hmac}`, 15-min TTL, keyed to
+gallery ID + current password hash so a password change invalidates outstanding
+grants). Every access check accepts cookie OR valid grant; a `template_redirect`
+priority-0 hook re-issues the cookie on the following 200 (which WebViews honour);
+at render time active grants are propagated onto thumb/download URLs so `<img>`
+requests aren't denied in a fully cookie-less client. Verified live with a cookie-less
+curl simulation: password POST → grant redirect → gallery + images render with zero
+cookies; tampered grant → denied; no grant/cookie → denied.
+
 ---
 
 ## Storage Layout
@@ -81,8 +95,33 @@ client-gallery/
 └── {gallery-slug}/
     ├── original/     # Full-size uploaded images
     ├── thumbs/       # Auto-generated WebP thumbnails ({filename}.webp)
+    │                 # (+ lazily cached {filename}.webp.jpg og:image variants)
     └── gallery.zip   # Cached bulk download ZIP
 ```
+
+## Server-side thumbnail service — cgm-thumbd (2026-07-08)
+Bulk thumbnail generation used to run inline in PHP-FPM (upload handler, the Sync
+button, and `get_files()`'s lazy regeneration) and **took the site down** on big
+galleries. It's now split out per Allen's ask:
+
+- **Server program:** `/opt/cgm-thumbd/` on funheim — `cgm_thumbd.py` (Python 3 +
+  Pillow, source lives in this repo under `server/`), run by
+  `cgm-thumbd.timer` every 60s as `www-data` at idle CPU/IO priority
+  (`Nice=19`, `IOSchedulingClass=idle`). Each pass: process `queue/` entries first,
+  then sweep all galleries for missing thumbs; 50s time budget; flock prevents
+  overlap; writes `status.json` heartbeat. Watermark/output parity with the GD code
+  (1080px max width, Josefin Sans bottom-right ~45% white, WebP q80) verified by eye
+  on a generated thumb. One improvement over GD: EXIF orientation is applied.
+  Needed `apt install python3-pil` (user-level Pillow wasn't visible to www-data).
+- **Plugin side:** settings page at Client Galleries → Thumbnail Service with the
+  service-directory field (option `cgm_thumb_service_dir`, set to `/opt/cgm-thumbd`
+  live). When `status.json` is fresh (<5 min) the plugin **never** generates thumbs
+  in PHP — upload/sync/lazy-regen all just touch `queue/{gallery-folder}` instead;
+  the Sync button notice says "queued" rather than a count. If the service dies,
+  the plugin silently falls back to the old in-PHP path so galleries keep working.
+- **Ops:** `systemctl status cgm-thumbd.timer`, logs via
+  `journalctl -u cgm-thumbd.service`. Deploy of the .py does NOT go through the
+  WP plugin dir — copy to `/opt/cgm-thumbd/` and it picks up next timer tick.
 
 ---
 

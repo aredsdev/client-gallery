@@ -23,6 +23,110 @@ class CGM_Gallery_Admin {
         // Success notices
         add_action( 'admin_notices', [ __CLASS__, 'maybe_show_sync_notice' ] );
         add_action( 'admin_notices', [ __CLASS__, 'maybe_show_zip_notice' ] );
+
+        // Thumbnail service settings page (Client Galleries → Thumbnail Service)
+        add_action( 'admin_menu', [ __CLASS__, 'add_settings_page' ] );
+        add_action( 'admin_init', [ __CLASS__, 'register_settings' ] );
+    }
+
+    /* ---------------------------------------------------------------------
+     * Thumbnail service settings
+     * ------------------------------------------------------------------ */
+
+    public static function add_settings_page() {
+        add_submenu_page(
+            'edit.php?post_type=client_gallery',
+            __( 'Thumbnail Service', 'client-gallery' ),
+            __( 'Thumbnail Service', 'client-gallery' ),
+            'manage_options',
+            'cgm-thumb-service',
+            [ __CLASS__, 'render_settings_page' ]
+        );
+    }
+
+    public static function register_settings() {
+        register_setting( 'cgm_thumb_service', CGM_Gallery_Storage::OPTION_SERVICE_DIR, [
+            'type'              => 'string',
+            'sanitize_callback' => function ( $value ) {
+                $value = trim( (string) $value );
+                return $value === '' ? '' : untrailingslashit( $value );
+            },
+            'default'           => '',
+        ] );
+    }
+
+    public static function render_settings_page() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
+        $dir    = CGM_Gallery_Storage::service_dir();
+        $active = CGM_Gallery_Storage::service_active();
+        $status = CGM_Gallery_Storage::service_status();
+        ?>
+        <div class="wrap">
+            <h1><?php esc_html_e( 'Thumbnail Service', 'client-gallery' ); ?></h1>
+
+            <p>
+                <?php esc_html_e( 'Thumbnail generation (resize + watermark) can run as a server-side service (cgm-thumbd) instead of inside PHP. Bulk generation inside PHP requests can take the whole site down; the service does the same work in the background at idle priority.', 'client-gallery' ); ?>
+            </p>
+
+            <form method="post" action="options.php">
+                <?php settings_fields( 'cgm_thumb_service' ); ?>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">
+                            <label for="cgm_thumb_service_dir">
+                                <?php esc_html_e( 'Service install directory', 'client-gallery' ); ?>
+                            </label>
+                        </th>
+                        <td>
+                            <input type="text"
+                                   id="cgm_thumb_service_dir"
+                                   name="<?php echo esc_attr( CGM_Gallery_Storage::OPTION_SERVICE_DIR ); ?>"
+                                   value="<?php echo esc_attr( $dir ); ?>"
+                                   class="regular-text"
+                                   placeholder="/opt/cgm-thumbd" />
+                            <p class="description">
+                                <?php esc_html_e( 'Directory of the cgm-thumbd install on this server (contains status.json and queue/). Leave empty to generate thumbnails in PHP (old behavior).', 'client-gallery' ); ?>
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e( 'Service status', 'client-gallery' ); ?></th>
+                        <td>
+                            <?php if ( ! $dir ) : ?>
+                                <span style="color:#996800;">&#9679;</span>
+                                <?php esc_html_e( 'Not configured — thumbnails generate in PHP.', 'client-gallery' ); ?>
+                            <?php elseif ( $active ) : ?>
+                                <span style="color:#00a32a;">&#9679;</span>
+                                <?php esc_html_e( 'Active — all thumbnail generation is handled by the server service.', 'client-gallery' ); ?>
+                            <?php else : ?>
+                                <span style="color:#d63638;">&#9679;</span>
+                                <?php esc_html_e( 'Configured but NOT responding (no fresh heartbeat) — falling back to PHP generation. Check: systemctl status cgm-thumbd.timer', 'client-gallery' ); ?>
+                            <?php endif; ?>
+
+                            <?php if ( $status ) : ?>
+                                <p class="description" style="margin-top:8px;">
+                                    <?php
+                                    printf(
+                                        /* translators: 1: iso time, 2: generated, 3: pending, 4: errors */
+                                        esc_html__( 'Last run: %1$s — generated %2$d, pending %3$d, errors %4$d', 'client-gallery' ),
+                                        esc_html( $status['last_run_iso'] ?? '?' ),
+                                        (int) ( $status['generated'] ?? 0 ),
+                                        (int) ( $status['pending'] ?? 0 ),
+                                        (int) ( $status['errors'] ?? 0 )
+                                    );
+                                    ?>
+                                </p>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                </table>
+                <?php submit_button(); ?>
+            </form>
+        </div>
+        <?php
     }
 
     public static function add_multipart_enctype() {
@@ -338,7 +442,11 @@ class CGM_Gallery_Admin {
         $count = intval( $_GET['cgm_synced_count'] );
 
         echo '<div class="notice notice-success is-dismissible">';
-        printf( '<p>Synced from server folder: generated %d thumbnail(s).</p>', $count );
+        if ( $count === -1 ) {
+            echo '<p>Queued for the server thumbnail service — thumbnails will appear within about a minute (see Client Galleries &rarr; Thumbnail Service for status).</p>';
+        } else {
+            printf( '<p>Synced from server folder: generated %d thumbnail(s).</p>', $count );
+        }
         echo '</div>';
     }
 

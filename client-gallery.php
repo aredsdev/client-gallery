@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Client Gallery Manager
  * Description: Private client galleries stored outside the Media Library with thumbnails and secure downloads.
- * Version: 0.2.0
+ * Version: 0.3.0
  * Author: Allen Redshaw
  */
 
@@ -347,8 +347,42 @@ function cgm_render_client_gallery_content( $content ) {
         <?php
         /**
          * 3) Render gallery grid (view access already granted at this point).
+         *
+         * If this request was unlocked via a URL grant (cookie-dropping
+         * WebViews like Meta's in-app browser), propagate the grant onto the
+         * thumb/download URLs — otherwise every <img>/download request would
+         * be denied again for lack of the cookie.
          */
         $files = CGM_Gallery_Storage::get_files( $gallery_id );
+
+        $active_view_grant = class_exists( 'CGM_Gallery_Access' )
+            && method_exists( 'CGM_Gallery_Access', 'active_view_grant' )
+            ? CGM_Gallery_Access::active_view_grant( $gallery_id )
+            : '';
+
+        $active_dl_grant = class_exists( 'CGM_Gallery_Access' )
+            && method_exists( 'CGM_Gallery_Access', 'active_download_grant' )
+            ? CGM_Gallery_Access::active_download_grant( $gallery_id )
+            : '';
+
+        if ( $active_view_grant || $active_dl_grant ) {
+            foreach ( $files as $fi => $f ) {
+                if ( $active_view_grant ) {
+                    $files[ $fi ]['thumb_url'] = add_query_arg(
+                        CGM_Gallery_Access::GRANT_PARAM_VIEW,
+                        rawurlencode( $active_view_grant ),
+                        $f['thumb_url']
+                    );
+                }
+                if ( $active_dl_grant ) {
+                    $files[ $fi ]['download_url'] = add_query_arg(
+                        CGM_Gallery_Access::GRANT_PARAM_DOWNLOAD,
+                        rawurlencode( $active_dl_grant ),
+                        $f['download_url']
+                    );
+                }
+            }
+        }
 
         if ( empty( $files ) ) :
             echo '<p>' . esc_html__( 'No images in this gallery yet.', 'client-gallery' ) . '</p>';

@@ -24,6 +24,21 @@ class CGM_Gallery_Access {
     const VIS_PASSWORD = 'password';
 
     /**
+     * URL-grant params: cookie-independent unlock fallback.
+     *
+     * Meta's in-app browser (Facebook/Instagram WebView) drops Set-Cookie on
+     * the 302 redirect that follows a successful password POST, so the very
+     * next request looked locked again and users were denied right after
+     * entering a correct password. The redirect now also carries a signed,
+     * short-lived grant token in the URL; every access check accepts either
+     * the cookie or a valid grant, and the cookie is re-issued on the
+     * following 200 response (which WebViews do honour).
+     */
+    const GRANT_PARAM_VIEW     = 'cgm_grant';
+    const GRANT_PARAM_DOWNLOAD = 'cgm_grant_dl';
+    const GRANT_TTL            = 900; // 15 minutes
+
+    /**
      * Bootstraps hooks.
      */
     public static function init() {
@@ -31,6 +46,10 @@ class CGM_Gallery_Access {
         // Admin meta box for visibility + passwords.
         add_action( 'add_meta_boxes', [ __CLASS__, 'add_meta_box' ] );
         add_action( 'save_post_client_gallery', [ __CLASS__, 'save_meta' ] );
+
+        // Re-issue unlock cookies from a URL grant before any output
+        // (Set-Cookie on a 200 works in WebViews that dropped it on the 302).
+        add_action( 'template_redirect', [ __CLASS__, 'maybe_reissue_cookies_from_grant' ], 0 );
     }
 
     /* ---------------------------------------------------------------------
@@ -251,6 +270,157 @@ class CGM_Gallery_Access {
         );
     }
 
+    /* ---------------------------------------------------------------------
+     * URL grants (cookie-independent unlock, for cookie-dropping WebViews)
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Build a short-lived signed URL grant: "{expiry}.{hmac}".
+     *
+     * Tied to gallery ID + current password hash + scope + expiry, so a
+     * password change invalidates outstanding grants immediately.
+     */
+    protected static function build_url_grant( $post_id, $hash, $scope ) {
+        if ( empty( $hash ) ) {
+            return '';
+        }
+
+        $expiry = time() + self::GRANT_TTL;
+        $data   = $post_id . '|' . $hash . '|' . $scope . '|' . $expiry;
+
+        return $expiry . '.' . hash_hmac( 'sha256', $data, wp_salt( 'cgm_gallery_access' ) );
+    }
+
+    /**
+     * Validate a URL grant string for a gallery + scope.
+     */
+    protected static function check_url_grant( $post_id, $hash, $scope, $grant ) {
+        if ( empty( $hash ) || empty( $grant ) || strpos( $grant, '.' ) === false ) {
+            return false;
+        }
+
+        list( $expiry, $sig ) = explode( '.', $grant, 2 );
+        $expiry = (int) $expiry;
+
+        if ( $expiry < time() ) {
+            return false;
+        }
+
+        $data     = $post_id . '|' . $hash . '|' . $scope . '|' . $expiry;
+        $expected = hash_hmac( 'sha256', $data, wp_salt( 'cgm_gallery_access' ) );
+
+        return hash_equals( $expected, $sig );
+    }
+
+    /**
+     * Read a grant param off the current request.
+     */
+    protected static function current_url_grant( $param ) {
+        return isset( $_GET[ $param ] )
+            ? sanitize_text_field( wp_unslash( $_GET[ $param ] ) )
+            : '';
+    }
+
+    /**
+     * Does the current request carry a valid VIEW grant for this gallery?
+     */
+    protected static function has_valid_view_grant( $post_id ) {
+        $grant = self::current_url_grant( self::GRANT_PARAM_VIEW );
+        if ( ! $grant ) {
+            return false;
+        }
+
+        $hash = get_post_meta( $post_id, self::META_VIEW_PASS_HASH, true );
+
+        return self::check_url_grant( $post_id, $hash, 'view', $grant );
+    }
+
+    /**
+     * Does the current request carry a valid DOWNLOAD grant for this gallery?
+     */
+    protected static function has_valid_download_grant( $post_id ) {
+        $grant = self::current_url_grant( self::GRANT_PARAM_DOWNLOAD );
+        if ( ! $grant ) {
+            return false;
+        }
+
+        $hash = get_post_meta( $post_id, self::META_DOWNLOAD_PASS_HASH, true );
+
+        return self::check_url_grant( $post_id, $hash, 'download', $grant );
+    }
+
+    /**
+     * Public: active grant strings for the current request (or '' if none),
+     * so templates can propagate them onto thumb/download URLs. Without this,
+     * a cookie-less WebView would unlock the page but every <img> request
+     * would still be denied.
+     */
+    public static function active_view_grant( $post_id ) {
+        return self::has_valid_view_grant( $post_id )
+            ? self::current_url_grant( self::GRANT_PARAM_VIEW )
+            : '';
+    }
+
+    public static function active_download_grant( $post_id ) {
+        return self::has_valid_download_grant( $post_id )
+            ? self::current_url_grant( self::GRANT_PARAM_DOWNLOAD )
+            : '';
+    }
+
+    /**
+     * template_redirect (priority 0): if the request carries a valid grant
+     * but the matching cookie is missing, set the cookie now — this response
+     * is a 200, which cookie-dropping WebViews accept.
+     */
+    public static function maybe_reissue_cookies_from_grant() {
+        if ( ! is_singular( 'client_gallery' ) || headers_sent() ) {
+            return;
+        }
+
+        $post_id = get_queried_object_id();
+        if ( $post_id <= 0 ) {
+            return;
+        }
+
+        if ( self::has_valid_view_grant( $post_id ) ) {
+            $hash        = get_post_meta( $post_id, self::META_VIEW_PASS_HASH, true );
+            $cookie_name = 'cgm_gallery_view_' . intval( $post_id );
+
+            if ( $hash && empty( $_COOKIE[ $cookie_name ] ) ) {
+                self::set_unlock_cookie( $cookie_name, self::build_token( $post_id, $hash, 'view' ) );
+            }
+        }
+
+        if ( self::has_valid_download_grant( $post_id ) ) {
+            $hash        = get_post_meta( $post_id, self::META_DOWNLOAD_PASS_HASH, true );
+            $cookie_name = 'cgm_gallery_dl_' . intval( $post_id );
+
+            if ( $hash && empty( $_COOKIE[ $cookie_name ] ) ) {
+                self::set_unlock_cookie( $cookie_name, self::build_token( $post_id, $hash, 'download' ) );
+            }
+        }
+    }
+
+    /**
+     * Shared cookie-setting logic for view/download unlock cookies.
+     */
+    protected static function set_unlock_cookie( $cookie_name, $token ) {
+        $cookie_args = [
+            'expires'  => time() + DAY_IN_SECONDS,
+            'path'     => defined( 'COOKIEPATH' ) && COOKIEPATH ? COOKIEPATH : '/',
+            'secure'   => is_ssl(),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ];
+
+        if ( defined( 'COOKIE_DOMAIN' ) && ! empty( COOKIE_DOMAIN ) ) {
+            $cookie_args['domain'] = COOKIE_DOMAIN;
+        }
+
+        setcookie( $cookie_name, $token, $cookie_args );
+        $_COOKIE[ $cookie_name ] = $token;
+    }
+
     /**
      * Has this visitor already unlocked viewing for this gallery?
      *
@@ -274,13 +444,15 @@ class CGM_Gallery_Access {
             ? sanitize_text_field( wp_unslash( $_COOKIE[ $cookie_name ] ) )
             : '';
 
-        if ( empty( $cookie_value ) ) {
-            return false;
+        if ( ! empty( $cookie_value ) ) {
+            $expected = self::build_token( $post_id, $stored_hash, 'view' );
+            if ( hash_equals( $expected, $cookie_value ) ) {
+                return true;
+            }
         }
 
-        $expected = self::build_token( $post_id, $stored_hash, 'view' );
-
-        return hash_equals( $expected, $cookie_value );
+        // Cookie missing/invalid: accept a valid URL grant (cookie-dropping WebViews).
+        return self::has_valid_view_grant( $post_id );
     }
 
     /**
@@ -306,13 +478,15 @@ class CGM_Gallery_Access {
             ? sanitize_text_field( wp_unslash( $_COOKIE[ $cookie_name ] ) )
             : '';
 
-        if ( empty( $cookie_value ) ) {
-            return false;
+        if ( ! empty( $cookie_value ) ) {
+            $expected = self::build_token( $post_id, $stored_hash, 'download' );
+            if ( hash_equals( $expected, $cookie_value ) ) {
+                return true;
+            }
         }
 
-        $expected = self::build_token( $post_id, $stored_hash, 'download' );
-
-        return hash_equals( $expected, $cookie_value );
+        // Cookie missing/invalid: accept a valid URL grant (cookie-dropping WebViews).
+        return self::has_valid_download_grant( $post_id );
     }
 
     /**
@@ -365,29 +539,30 @@ class CGM_Gallery_Access {
             return false;
         }
 
-        $token       = self::build_token( $post_id, $stored_hash, 'view' );
-        $cookie_name = 'cgm_gallery_view_' . intval( $post_id );
-        $expire      = time() + DAY_IN_SECONDS;
-
-        $cookie_args = [
-            'expires'  => $expire,
-            'path'     => defined('COOKIEPATH') && COOKIEPATH ? COOKIEPATH : '/',
-            'secure'   => is_ssl(),
-            'httponly' => true,
-            'samesite' => 'Lax',
-        ];
-
-        // Only set domain if it’s a real domain (empty string breaks cookies on some setups)
-        if ( defined('COOKIE_DOMAIN') && ! empty( COOKIE_DOMAIN ) ) {
-            $cookie_args['domain'] = COOKIE_DOMAIN;
-        }
-
-        setcookie( $cookie_name, $token, $cookie_args );
-
-
-        $_COOKIE[ $cookie_name ] = $token;
+        self::set_unlock_cookie(
+            'cgm_gallery_view_' . intval( $post_id ),
+            self::build_token( $post_id, $stored_hash, 'view' )
+        );
 
         return true;
+    }
+
+    /**
+     * Public: mint a fresh VIEW grant for redirect URLs after a successful
+     * password unlock (cookie-dropping WebView fallback).
+     */
+    public static function fresh_view_grant( $post_id ) {
+        $hash = get_post_meta( $post_id, self::META_VIEW_PASS_HASH, true );
+        return self::build_url_grant( (int) $post_id, $hash, 'view' );
+    }
+
+    /**
+     * Public: mint a fresh DOWNLOAD grant for redirect URLs after a
+     * successful password unlock (cookie-dropping WebView fallback).
+     */
+    public static function fresh_download_grant( $post_id ) {
+        $hash = get_post_meta( $post_id, self::META_DOWNLOAD_PASS_HASH, true );
+        return self::build_url_grant( (int) $post_id, $hash, 'download' );
     }
 
     /**
@@ -409,27 +584,10 @@ class CGM_Gallery_Access {
             return false;
         }
 
-        $token       = self::build_token( $post_id, $stored_hash, 'download' );
-        $cookie_name = 'cgm_gallery_dl_' . intval( $post_id );
-        $expire      = time() + DAY_IN_SECONDS;
-
-        $cookie_args = [
-            'expires'  => $expire,
-            'path'     => defined('COOKIEPATH') && COOKIEPATH ? COOKIEPATH : '/',
-            'secure'   => is_ssl(),
-            'httponly' => true,
-            'samesite' => 'Lax',
-        ];
-
-        // Only set domain if it’s a real domain (empty string breaks cookies on some setups)
-        if ( defined('COOKIE_DOMAIN') && ! empty( COOKIE_DOMAIN ) ) {
-            $cookie_args['domain'] = COOKIE_DOMAIN;
-        }
-
-        setcookie( $cookie_name, $token, $cookie_args );
-
-
-        $_COOKIE[ $cookie_name ] = $token;
+        self::set_unlock_cookie(
+            'cgm_gallery_dl_' . intval( $post_id ),
+            self::build_token( $post_id, $stored_hash, 'download' )
+        );
 
         return true;
     }
@@ -481,8 +639,15 @@ class CGM_Gallery_Access {
                 $submitted = (string) wp_unslash( $_POST['cgm_view_password'] );
 
                 if ( self::try_unlock_view_with_password( $post_id, $submitted ) ) {
-                    // Scrub POST.
-                    wp_safe_redirect( get_permalink( $post_id ) );
+                    // Scrub POST. Carry a URL grant through the redirect:
+                    // Meta's in-app browser drops Set-Cookie on 302s, so the
+                    // cookie alone isn't enough to survive this hop.
+                    $redirect = add_query_arg(
+                        self::GRANT_PARAM_VIEW,
+                        rawurlencode( self::fresh_view_grant( $post_id ) ),
+                        get_permalink( $post_id )
+                    );
+                    wp_safe_redirect( $redirect );
                     exit;
                 } else {
                     $password_error = true;
@@ -582,6 +747,15 @@ class CGM_Gallery_Access {
                 // Only allow safe redirects; fallback to gallery downloads section.
                 $fallback = get_permalink( $post_id ) . '#downloads';
                 $redirect = wp_validate_redirect( $redirect, $fallback );
+
+                // Carry a URL grant through the redirect: Meta's in-app
+                // browser drops Set-Cookie on 302s, so the very next request
+                // (often the download itself) would otherwise 403.
+                $redirect = add_query_arg(
+                    self::GRANT_PARAM_DOWNLOAD,
+                    rawurlencode( self::fresh_download_grant( $post_id ) ),
+                    $redirect
+                );
 
                 wp_safe_redirect( $redirect );
                 exit;

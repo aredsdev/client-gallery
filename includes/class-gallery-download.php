@@ -357,13 +357,30 @@ class CGM_Gallery_Download {
 
 /**
  * Helper for building the download-all URL for a gallery.
+ *
+ * If the current request holds a URL download grant (cookie-dropping
+ * WebView flow), it rides along so the ZIP request isn't denied.
  */
 function cgm_download_all_url( $gallery_id ) {
-    return add_query_arg(
+    $url = add_query_arg(
         [
             'action'     => 'cgm_download_all',
             'gallery_id' => (int) $gallery_id,
         ],
         admin_url( 'admin-post.php' )
     );
+
+    if ( class_exists( 'CGM_Gallery_Access' )
+        && method_exists( 'CGM_Gallery_Access', 'active_download_grant' ) ) {
+        $grant = CGM_Gallery_Access::active_download_grant( (int) $gallery_id );
+        if ( $grant ) {
+            $url = add_query_arg(
+                CGM_Gallery_Access::GRANT_PARAM_DOWNLOAD,
+                rawurlencode( $grant ),
+                $url
+            );
+        }
+    }
+
+    return $url;
 }
