@@ -153,11 +153,37 @@
             openModal();
         }
 
-        // With server-side redirect (PHP), don't auto-navigate here.
-        // Just clear any pending download so it can't fire twice.
+        // Clear any pending download so it can't fire twice.
         try {
             sessionStorage.removeItem(STORAGE_KEY);
         } catch (e) {}
+
+        // Just unlocked: PHP sent us back here (unlocked) with the intended
+        // download, so confirm it and start it from this page.
+        var startUrl = modal.dataset.cgmStartDownload;
+        if (startUrl) {
+            var toast = document.createElement('div');
+            toast.className = 'cgm-toast';
+            toast.setAttribute('role', 'status');
+            toast.textContent = 'Downloads unlocked. Your download is starting…';
+            document.body.appendChild(toast);
+            void toast.offsetWidth;
+            toast.classList.add('is-visible');
+            setTimeout(function () {
+                toast.classList.remove('is-visible');
+            }, 6000);
+
+            // Drop the param so a refresh doesn't download again.
+            try {
+                var clean = new URL(window.location.href);
+                clean.searchParams.delete('cgm_dl_next');
+                history.replaceState(null, '', clean.toString());
+            } catch (e) {}
+
+            setTimeout(function () {
+                window.location.href = startUrl;
+            }, 400);
+        }
 
     }
 

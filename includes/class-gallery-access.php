@@ -18,6 +18,7 @@ class CGM_Gallery_Access {
     const META_VISIBILITY          = '_cgm_visibility';
     const META_VIEW_PASS_HASH      = '_cgm_view_password_hash';
     const META_DOWNLOAD_PASS_HASH  = '_cgm_download_password_hash';
+    const META_HIDDEN              = '_cgm_hidden';
 
     // Visibility options (for viewing only)
     const VIS_PUBLIC   = 'public';
@@ -38,6 +39,9 @@ class CGM_Gallery_Access {
     const GRANT_PARAM_DOWNLOAD = 'cgm_grant_dl';
     const GRANT_TTL            = 900; // 15 minutes
 
+    // Download to start once the gallery reloads after a download unlock.
+    const DL_NEXT_PARAM = 'cgm_dl_next';
+
     /**
      * Bootstraps hooks.
      */
@@ -50,6 +54,14 @@ class CGM_Gallery_Access {
         // Re-issue unlock cookies from a URL grant before any output
         // (Set-Cookie on a 200 works in WebViews that dropped it on the 302).
         add_action( 'template_redirect', [ __CLASS__, 'maybe_reissue_cookies_from_grant' ], 0 );
+
+        // Hidden galleries: reachable only by their exact link.
+        add_action( 'pre_get_posts', [ __CLASS__, 'exclude_hidden_from_queries' ] );
+        add_filter( 'rest_prepare_client_gallery', [ __CLASS__, 'rest_block_hidden' ], 10, 3 );
+        add_action( 'template_redirect', [ __CLASS__, 'block_hidden_id_lookup' ], 1 );
+        add_filter( 'wpseo_exclude_from_sitemap_by_post_ids', [ __CLASS__, 'yoast_exclude_hidden' ] );
+        add_filter( 'wpseo_opengraph_image', [ __CLASS__, 'strip_hidden_social_image' ] );
+        add_filter( 'wpseo_twitter_image', [ __CLASS__, 'strip_hidden_social_image' ] );
     }
 
     /* ---------------------------------------------------------------------
@@ -127,6 +139,21 @@ class CGM_Gallery_Access {
 
         <hr/>
 
+        <p>
+            <label>
+                <input type="checkbox"
+                       name="cgm_hidden"
+                       value="1"
+                    <?php checked( self::is_hidden( $post->ID ) ); ?> />
+                <strong><?php esc_html_e( 'Hidden (link only)', 'client-gallery' ); ?></strong>
+            </label>
+        </p>
+        <p class="description">
+            <?php esc_html_e( 'Kept out of the gallery feed, RSS, sitemaps, search engines, the REST API and link-preview images. Cover image is not served publicly. Only someone with the exact link can open it — pair with a viewing password, and use a non-guessable slug.', 'client-gallery' ); ?>
+        </p>
+
+        <hr/>
+
         <p><strong><?php esc_html_e( 'Downloads', 'client-gallery' ); ?></strong></p>
 
         <p class="description">
@@ -193,6 +220,12 @@ class CGM_Gallery_Access {
 
         update_post_meta( $post_id, self::META_VISIBILITY, $visibility );
 
+        if ( ! empty( $_POST['cgm_hidden'] ) ) {
+            update_post_meta( $post_id, self::META_HIDDEN, '1' );
+        } else {
+            delete_post_meta( $post_id, self::META_HIDDEN );
+        }
+
         // New viewing password: only hash if provided.
         if ( ! empty( $_POST['cgm_new_view_password'] ) ) {
             $plain = (string) wp_unslash( $_POST['cgm_new_view_password'] );
@@ -231,7 +264,117 @@ class CGM_Gallery_Access {
     * "Private" in CGM means: not indexable without unlocking viewing.
     */
     public static function gallery_is_private( $post_id ) {
-        return self::requires_view_password( (int) $post_id );
+        return self::requires_view_password( (int) $post_id ) || self::is_hidden( (int) $post_id );
+    }
+
+    /**
+     * Is this gallery hidden (link-only)?
+     */
+    public static function is_hidden( $post_id ) {
+        return get_post_meta( (int) $post_id, self::META_HIDDEN, true ) === '1';
+    }
+
+    /* ---------------------------------------------------------------------
+     * Hidden galleries
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Drop hidden galleries from every non-singular gallery query on the
+     * front end and REST: gallery index block, RSS feeds, archives, the
+     * plugin's own sitemap, REST collections. wp-admin lists are untouched,
+     * and editors still see them in REST (block editor).
+     */
+    public static function exclude_hidden_from_queries( $query ) {
+        if ( is_admin() && ! wp_doing_ajax() ) {
+            return;
+        }
+        if ( defined( 'REST_REQUEST' ) && REST_REQUEST && current_user_can( 'edit_posts' ) ) {
+            return;
+        }
+        if ( $query->get( 'cgm_include_hidden' ) ) {
+            return;
+        }
+
+        $types = (array) $query->get( 'post_type' );
+        if ( ! in_array( 'client_gallery', $types, true ) && ! in_array( 'any', $types, true ) ) {
+            return;
+        }
+
+        // Single gallery requested by its slug: let it load.
+        if ( $query->get( 'client_gallery' ) || $query->get( 'name' ) ) {
+            return;
+        }
+
+        $meta_query = $query->get( 'meta_query' );
+        if ( ! is_array( $meta_query ) ) {
+            $meta_query = [];
+        }
+        $meta_query[] = [
+            'relation' => 'OR',
+            [ 'key' => self::META_HIDDEN, 'compare' => 'NOT EXISTS' ],
+            [ 'key' => self::META_HIDDEN, 'value' => '1', 'compare' => '!=' ],
+        ];
+        $query->set( 'meta_query', $meta_query );
+    }
+
+    /**
+     * REST single fetch (/wp/v2/client_gallery/<id>) doesn't go through
+     * WP_Query - 404 hidden galleries for anyone who can't edit them.
+     */
+    public static function rest_block_hidden( $response, $post, $request ) {
+        if ( self::is_hidden( $post->ID ) && ! current_user_can( 'edit_post', $post->ID ) ) {
+            return new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), [ 'status' => 404 ] );
+        }
+        return $response;
+    }
+
+    /**
+     * Gallery IDs are sequential, and ?p=<id> / ?client_gallery=<id> would
+     * redirect_canonical (priority 10) straight to the pretty URL, leaking the
+     * slug. Only the exact slug link may open a hidden gallery.
+     */
+    public static function block_hidden_id_lookup() {
+        if ( ! is_singular( 'client_gallery' ) ) {
+            return;
+        }
+        $post_id = get_queried_object_id();
+        if ( ! self::is_hidden( $post_id ) || current_user_can( 'edit_post', $post_id ) ) {
+            return;
+        }
+
+        $slug = (string) get_post_field( 'post_name', $post_id );
+        $requested = (string) get_query_var( 'client_gallery' );
+        if ( $requested === '' || $requested !== $slug ) {
+            global $wp_query;
+            $wp_query->set_404();
+            status_header( 404 );
+            nocache_headers();
+        }
+    }
+
+    public static function yoast_exclude_hidden( $ids ) {
+        $hidden = get_posts( [
+            'post_type'        => 'client_gallery',
+            'post_status'      => 'any',
+            'posts_per_page'   => -1,
+            'fields'           => 'ids',
+            'meta_key'         => self::META_HIDDEN,
+            'meta_value'         => '1',
+            'suppress_filters'   => true,
+            'cgm_include_hidden' => true,
+        ] );
+        return array_merge( (array) $ids, $hidden );
+    }
+
+    /**
+     * Yoast adds the featured image to og:image / twitter:image on its own -
+     * keep hidden galleries' photos out of link previews.
+     */
+    public static function strip_hidden_social_image( $image ) {
+        if ( is_singular( 'client_gallery' ) && self::is_hidden( get_queried_object_id() ) ) {
+            return '';
+        }
+        return $image;
     }
 
     /**
@@ -739,25 +882,35 @@ class CGM_Gallery_Access {
 
             if ( self::try_unlock_download_with_password( $post_id, $submitted ) ) {
 
-                // If the front-end provided an intended download URL, go there immediately (better UX).
-                $redirect = isset( $_POST['cgm_download_redirect'] )
-                    ? wp_unslash( $_POST['cgm_download_redirect'] )
+                // Intended download URL from the front-end, safe hosts only.
+                $next = isset( $_POST['cgm_download_redirect'] )
+                    ? wp_validate_redirect( wp_unslash( $_POST['cgm_download_redirect'] ), '' )
                     : '';
 
-                // Only allow safe redirects; fallback to gallery downloads section.
-                $fallback = get_permalink( $post_id ) . '#downloads';
-                $redirect = wp_validate_redirect( $redirect, $fallback );
+                // Land back on the gallery, not straight in the file: a file
+                // response never replaces the page, so the modal stayed open
+                // and the page kept its locked state, re-prompting on every
+                // click (2026-10-16). The reloaded page starts the download
+                // itself (password-modal.js).
+                $redirect = get_permalink( $post_id );
 
-                // Carry a URL grant through the redirect: Meta's in-app
-                // browser drops Set-Cookie on 302s, so the very next request
-                // (often the download itself) would otherwise 403.
+                // Carry URL grants through the redirect: Meta's in-app
+                // browser drops Set-Cookie on 302s, so the reloaded page (and
+                // the download it starts) would otherwise be locked again.
+                $view_grant = self::active_view_grant( $post_id );
+                if ( $view_grant ) {
+                    $redirect = add_query_arg( self::GRANT_PARAM_VIEW, rawurlencode( $view_grant ), $redirect );
+                }
                 $redirect = add_query_arg(
                     self::GRANT_PARAM_DOWNLOAD,
                     rawurlencode( self::fresh_download_grant( $post_id ) ),
                     $redirect
                 );
+                if ( $next ) {
+                    $redirect = add_query_arg( self::DL_NEXT_PARAM, rawurlencode( $next ), $redirect );
+                }
 
-                wp_safe_redirect( $redirect );
+                wp_safe_redirect( $redirect . '#downloads' );
                 exit;
 
             } else {

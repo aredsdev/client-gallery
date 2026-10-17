@@ -148,7 +148,20 @@ class CGM_Gallery_Blocks {
                 && method_exists( 'CGM_Gallery_Access', 'requires_view_password' )
                 && CGM_Gallery_Access::requires_view_password( $gallery_id );
 
-            if ( $cover_basename ) {
+            // Featured image wins: it's a media-library file, already public (og:image).
+            if ( has_post_thumbnail( $gallery_id ) ) {
+                $lead_html = get_the_post_thumbnail(
+                    $gallery_id,
+                    'medium_large',
+                    [
+                        'class'   => 'cgm-gallery-index-image',
+                        'alt'     => $title,
+                        'loading' => 'lazy',
+                    ]
+                );
+            }
+
+            if ( ! $lead_html && $cover_basename ) {
                 // Use dedicated public cover endpoint.
                 $cover_thumb_url = add_query_arg(
                     [

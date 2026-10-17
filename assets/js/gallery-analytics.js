@@ -96,10 +96,11 @@
             });
         }
 
-        // --- Download-password unlock. Success 302s straight into the file
-        // (no page reload), so fire at submit time with beacon transport and
-        // credit the intended download too; a wrong password re-renders the
-        // page with the error attribute, which nets out as unlock_failed.
+        // --- Download-password unlock. Fire at submit time with beacon
+        // transport and credit the intended download too (the reloaded page
+        // starts it by navigation, not a click, so it isn't counted twice);
+        // a wrong password re-renders the page with the error attribute,
+        // which nets out as unlock_failed.
         var dlModal = document.getElementById('cgm-download-password-modal');
 
         if (dlModal && dlModal.getAttribute('data-cgm-download-error') === '1') {

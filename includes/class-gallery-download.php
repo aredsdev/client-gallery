@@ -75,7 +75,12 @@ class CGM_Gallery_Download {
         }
 
         header( 'Content-Length: ' . filesize( $thumb_path ) );
-        header( 'Cache-Control: public, max-age=31536000' );
+        // 1 day, not 1 year - matches CGM_Gallery_Storage's public-thumb cache lifetime.
+        // A year-long cache with no revalidation meant a visitor who ever loaded a
+        // broken/missing thumb once (e.g. before cgm-thumbd had generated it yet) would
+        // keep seeing that broken result in their own browser for up to a year, even
+        // after the server started serving a good file.
+        header( 'Cache-Control: public, max-age=86400' );
 
         readfile( $thumb_path );
         exit;
@@ -89,6 +94,16 @@ class CGM_Gallery_Download {
         $gallery_id = isset( $_GET['gallery_id'] ) ? (int) $_GET['gallery_id'] : 0;
 
         if ( ! $gallery_id || get_post_type( $gallery_id ) !== 'client_gallery' ) {
+            status_header( 404 );
+            exit;
+        }
+
+        // Hidden galleries never appear in the index block (the only consumer of
+        // this endpoint), so their cover is for editors only. 404, not 403, so
+        // probing gallery IDs doesn't confirm a hidden gallery exists.
+        if ( class_exists( 'CGM_Gallery_Access' )
+            && CGM_Gallery_Access::is_hidden( $gallery_id )
+            && ! current_user_can( 'edit_post', $gallery_id ) ) {
             status_header( 404 );
             exit;
         }
@@ -127,7 +142,12 @@ class CGM_Gallery_Download {
         }
 
         header( 'Content-Length: ' . filesize( $thumb_path ) );
-        header( 'Cache-Control: public, max-age=31536000' );
+        // 1 day, not 1 year - matches CGM_Gallery_Storage's public-thumb cache lifetime.
+        // A year-long cache with no revalidation meant a visitor who ever loaded a
+        // broken/missing thumb once (e.g. before cgm-thumbd had generated it yet) would
+        // keep seeing that broken result in their own browser for up to a year, even
+        // after the server started serving a good file.
+        header( 'Cache-Control: public, max-age=86400' );
 
         readfile( $thumb_path );
         exit;
@@ -197,12 +217,70 @@ class CGM_Gallery_Download {
         $download_name = sanitize_file_name( $basename );
         $filesize      = filesize( $path );
 
+        // iOS: an attachment always lands in the Files app. Photos is only offered
+        // (long-press > Save to Photos) for a real image shown inline. The JS adds
+        // ?inline=1 on iOS (page wrapper with instructions) and the wrapper's <img>
+        // requests ?raw=1 (the image itself, Content-Disposition: inline).
+        $image_types = [
+            'jpg'  => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'png'  => 'image/png',
+            'gif'  => 'image/gif',
+            'webp' => 'image/webp',
+        ];
+        $ext        = strtolower( pathinfo( $basename, PATHINFO_EXTENSION ) );
+        $image_type = isset( $image_types[ $ext ] ) ? $image_types[ $ext ] : '';
+
         header( 'CDN-Cache-Control: no-store' );
         header( 'Cloudflare-CDN-Cache-Control: no-store' );
         header( 'X-Content-Type-Options: nosniff' );
 
-        header( 'Content-Type: application/octet-stream' );
-        header( 'Content-Disposition: attachment; filename="' . $download_name . '"; filename*=UTF-8\'\'' . rawurlencode( $download_name ) );
+        if ( $image_type && isset( $_GET['inline'] ) ) {
+            $query = wp_unslash( $_GET );
+            unset( $query['inline'] );
+            $query['raw'] = 1;
+            $img_src      = admin_url( 'admin-post.php' ) . '?' . http_build_query( $query );
+            $back_url     = get_permalink( $gallery_id );
+
+            header( 'Content-Type: text/html; charset=utf-8' );
+            header( 'X-Robots-Tag: noindex, nofollow' );
+            header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
+            ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Save photo</title>
+<style>
+html,body{margin:0;background:#111;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;text-align:center}
+.bar{padding:14px 16px;font-size:16px;line-height:1.4;background:#222}
+.bar strong{display:block;font-size:18px;margin-bottom:2px}
+.back{display:inline-block;margin-top:8px;color:#9cf;font-size:15px}
+img{display:block;max-width:100%;height:auto;margin:0 auto}
+</style>
+</head>
+<body>
+<div class="bar">
+<strong>Press and hold the photo, then tap &ldquo;Save to Photos&rdquo;</strong>
+(it may say &ldquo;Add to Photos&rdquo; on some devices)
+<br><a class="back" href="<?php echo esc_url( $back_url ); ?>" onclick="if(history.length>1){history.back();return false;}">&larr; Back to gallery</a>
+</div>
+<img src="<?php echo esc_url( $img_src ); ?>" alt="">
+</body>
+</html>
+            <?php
+            exit;
+        }
+
+        if ( $image_type && isset( $_GET['raw'] ) ) {
+            header( 'Content-Type: ' . $image_type );
+            header( 'Content-Disposition: inline; filename="' . $download_name . '"' );
+        } else {
+            header( 'Content-Type: application/octet-stream' );
+            header( 'Content-Disposition: attachment; filename="' . $download_name . '"; filename*=UTF-8\'\'' . rawurlencode( $download_name ) );
+        }
         header( 'Content-Length: ' . $filesize );
         header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
         header( 'Pragma: public' );

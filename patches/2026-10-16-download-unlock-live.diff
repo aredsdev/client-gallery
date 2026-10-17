@@ -1,0 +1,148 @@
+diff -ru a/assets/js/password-modal.js b/assets/js/password-modal.js
+--- a/assets/js/password-modal.js	2026-10-16 20:34:26.470253700 -0400
++++ b/assets/js/password-modal.js	2026-10-16 20:34:26.925917300 -0400
+@@ -153,12 +153,38 @@
+             openModal();
+         }
+ 
+-        // With server-side redirect (PHP), don't auto-navigate here.
+-        // Just clear any pending download so it can't fire twice.
++        // Clear any pending download so it can't fire twice.
+         try {
+             sessionStorage.removeItem(STORAGE_KEY);
+         } catch (e) {}
+ 
++        // Just unlocked: PHP sent us back here (unlocked) with the intended
++        // download, so confirm it and start it from this page.
++        var startUrl = modal.dataset.cgmStartDownload;
++        if (startUrl) {
++            var toast = document.createElement('div');
++            toast.className = 'cgm-toast';
++            toast.setAttribute('role', 'status');
++            toast.textContent = 'Downloads unlocked. Your download is starting…';
++            document.body.appendChild(toast);
++            void toast.offsetWidth;
++            toast.classList.add('is-visible');
++            setTimeout(function () {
++                toast.classList.remove('is-visible');
++            }, 6000);
++
++            // Drop the param so a refresh doesn't download again.
++            try {
++                var clean = new URL(window.location.href);
++                clean.searchParams.delete('cgm_dl_next');
++                history.replaceState(null, '', clean.toString());
++            } catch (e) {}
++
++            setTimeout(function () {
++                window.location.href = startUrl;
++            }, 400);
++        }
++
+     }
+ 
+     // Run init immediately if DOM is ready, otherwise on DOMContentLoaded.
+diff -ru a/client-gallery.php b/client-gallery.php
+--- a/client-gallery.php	2026-10-16 20:34:26.468254400 -0400
++++ b/client-gallery.php	2026-10-16 20:34:26.924915400 -0400
+@@ -83,7 +83,7 @@
+         'cgm-password-modal-js',
+         CGM_PLUGIN_URL . 'assets/js/password-modal.js',
+         [],
+-        '0.1.4',
++        '0.1.5',
+         true
+     );
+ 
+@@ -278,6 +278,23 @@
+             && method_exists( 'CGM_Gallery_Access', 'user_can_download' )
+             ? CGM_Gallery_Access::user_can_download( $gallery_id )
+             : false;
++
++        // Download to start on this load, right after a download unlock.
++        $download_start = '';
++        if ( $download_unlocked && isset( $_GET[ CGM_Gallery_Access::DL_NEXT_PARAM ] ) ) {
++            $download_start = wp_validate_redirect(
++                esc_url_raw( wp_unslash( $_GET[ CGM_Gallery_Access::DL_NEXT_PARAM ] ) ),
++                ''
++            );
++            $start_grant = CGM_Gallery_Access::active_download_grant( $gallery_id );
++            if ( $download_start && $start_grant ) {
++                $download_start = add_query_arg(
++                    CGM_Gallery_Access::GRANT_PARAM_DOWNLOAD,
++                    rawurlencode( $start_grant ),
++                    $download_start
++                );
++            }
++        }
+         ?>
+ 
+         <div class="cgm-gallery-header" id="downloads">
+@@ -504,6 +521,7 @@
+         data-cgm-requires-password="<?php echo $requires_download_password ? '1' : '0'; ?>"
+         data-cgm-download-unlocked="<?php echo $download_unlocked ? '1' : '0'; ?>"
+         <?php echo $download_error ? ' data-cgm-download-error="1"' : ''; ?>
++        <?php echo $download_start ? ' data-cgm-start-download="' . esc_url( $download_start ) . '"' : ''; ?>
+         hidden
+     >
+         <div class="cgm-password-modal-inner">
+diff -ru a/includes/class-gallery-access.php b/includes/class-gallery-access.php
+--- a/includes/class-gallery-access.php	2026-10-16 20:34:26.471329100 -0400
++++ b/includes/class-gallery-access.php	2026-10-16 20:34:26.670267900 -0400
+@@ -38,6 +38,9 @@
+     const GRANT_PARAM_DOWNLOAD = 'cgm_grant_dl';
+     const GRANT_TTL            = 900; // 15 minutes
+ 
++    // Download to start once the gallery reloads after a download unlock.
++    const DL_NEXT_PARAM = 'cgm_dl_next';
++
+     /**
+      * Bootstraps hooks.
+      */
+@@ -739,25 +742,35 @@
+ 
+             if ( self::try_unlock_download_with_password( $post_id, $submitted ) ) {
+ 
+-                // If the front-end provided an intended download URL, go there immediately (better UX).
+-                $redirect = isset( $_POST['cgm_download_redirect'] )
+-                    ? wp_unslash( $_POST['cgm_download_redirect'] )
++                // Intended download URL from the front-end, safe hosts only.
++                $next = isset( $_POST['cgm_download_redirect'] )
++                    ? wp_validate_redirect( wp_unslash( $_POST['cgm_download_redirect'] ), '' )
+                     : '';
+ 
+-                // Only allow safe redirects; fallback to gallery downloads section.
+-                $fallback = get_permalink( $post_id ) . '#downloads';
+-                $redirect = wp_validate_redirect( $redirect, $fallback );
+-
+-                // Carry a URL grant through the redirect: Meta's in-app
+-                // browser drops Set-Cookie on 302s, so the very next request
+-                // (often the download itself) would otherwise 403.
++                // Land back on the gallery, not straight in the file: a file
++                // response never replaces the page, so the modal stayed open
++                // and the page kept its locked state, re-prompting on every
++                // click (2026-10-16). The reloaded page starts the download
++                // itself (password-modal.js).
++                $redirect = get_permalink( $post_id );
++
++                // Carry URL grants through the redirect: Meta's in-app
++                // browser drops Set-Cookie on 302s, so the reloaded page (and
++                // the download it starts) would otherwise be locked again.
++                $view_grant = self::active_view_grant( $post_id );
++                if ( $view_grant ) {
++                    $redirect = add_query_arg( self::GRANT_PARAM_VIEW, rawurlencode( $view_grant ), $redirect );
++                }
+                 $redirect = add_query_arg(
+                     self::GRANT_PARAM_DOWNLOAD,
+                     rawurlencode( self::fresh_download_grant( $post_id ) ),
+                     $redirect
+                 );
++                if ( $next ) {
++                    $redirect = add_query_arg( self::DL_NEXT_PARAM, rawurlencode( $next ), $redirect );
++                }
+ 
+-                wp_safe_redirect( $redirect );
++                wp_safe_redirect( $redirect . '#downloads' );
+                 exit;
+ 
+             } else {

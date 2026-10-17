@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Client Gallery Manager
  * Description: Private client galleries stored outside the Media Library with thumbnails and secure downloads.
- * Version: 0.3.1
+ * Version: 0.3.2
  * Author: Allen Redshaw
  */
 
@@ -75,7 +75,7 @@ function cgm_register_assets() {
         'cgm-gallery-lightbox',
         CGM_PLUGIN_URL . 'assets/js/gallery-lightbox.js',
         [],
-        '0.1.6',
+        '0.1.7',
         true
     );
 
@@ -278,6 +278,23 @@ function cgm_render_client_gallery_content( $content ) {
             && method_exists( 'CGM_Gallery_Access', 'user_can_download' )
             ? CGM_Gallery_Access::user_can_download( $gallery_id )
             : false;
+
+        // Download to start on this load, right after a download unlock.
+        $download_start = '';
+        if ( $download_unlocked && isset( $_GET[ CGM_Gallery_Access::DL_NEXT_PARAM ] ) ) {
+            $download_start = wp_validate_redirect(
+                esc_url_raw( wp_unslash( $_GET[ CGM_Gallery_Access::DL_NEXT_PARAM ] ) ),
+                ''
+            );
+            $start_grant = CGM_Gallery_Access::active_download_grant( $gallery_id );
+            if ( $download_start && $start_grant ) {
+                $download_start = add_query_arg(
+                    CGM_Gallery_Access::GRANT_PARAM_DOWNLOAD,
+                    rawurlencode( $start_grant ),
+                    $download_start
+                );
+            }
+        }
         ?>
 
         <div class="cgm-gallery-header" id="downloads">
@@ -350,6 +367,26 @@ function cgm_render_client_gallery_content( $content ) {
 
 
             </div>
+
+            <!-- iOS only: Photos is only reachable via the per-photo Download button -->
+            <p class="cgm-ios-tip" hidden style="margin:0;font-size:.95rem;line-height:1.45;opacity:.85">
+                <strong><?php esc_html_e( 'On iPhone or iPad?', 'client-gallery' ); ?></strong>
+                <?php esc_html_e( 'Tap a photo, then tap "Download image". Press and hold the photo that opens and tap "Save to Photos".', 'client-gallery' ); ?>
+                <?php esc_html_e( 'Any trouble, message me on', 'client-gallery' ); ?>
+                <a href="https://www.instagram.com/parfocalmedia/" target="_blank" rel="noopener noreferrer">Instagram</a>
+                <?php esc_html_e( 'or use the', 'client-gallery' ); ?>
+                <a href="<?php echo esc_url( home_url( '/contact/' ) ); ?>"><?php esc_html_e( 'contact form', 'client-gallery' ); ?></a>.
+            </p>
+            <script>
+            (function () {
+                var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                if (isIOS) {
+                    var tips = document.querySelectorAll('.cgm-ios-tip');
+                    for (var i = 0; i < tips.length; i++) { tips[i].hidden = false; }
+                }
+            })();
+            </script>
         </div>
 
 
@@ -484,6 +521,7 @@ function cgm_render_client_gallery_content( $content ) {
         data-cgm-requires-password="<?php echo $requires_download_password ? '1' : '0'; ?>"
         data-cgm-download-unlocked="<?php echo $download_unlocked ? '1' : '0'; ?>"
         <?php echo $download_error ? ' data-cgm-download-error="1"' : ''; ?>
+        <?php echo $download_start ? ' data-cgm-start-download="' . esc_url( $download_start ) . '"' : ''; ?>
         hidden
     >
         <div class="cgm-password-modal-inner">

@@ -2,6 +2,10 @@
 tags:
   - dev/wp-plugins
 type: index
+related:
+  - "[[dev/wp-plugins/CLAUDE|dev/wp-plugins index]]"
+  - "[[dev/websites/parfocal/CLAUDE|parfocal]]"
+  - "[[TODO]]"
 updated: 2026-07-02
 ---
 
@@ -19,7 +23,7 @@ Images are stored **outside** the media library at `/var/www/client_galleries/`.
 
 - **Plugin slug:** `client-gallery`
 - **Custom post type:** `client_gallery`
-- **Version:** 0.3.1 (deployed live 2026-07-08)
+- **Version:** 0.3.2 (deployed live 2026-08-08)
 - **Author:** Allen Redshaw
 
 ---
@@ -153,7 +157,7 @@ galleries. It's now split out per Allen's ask:
 ## Admin-Post Endpoints
 | Action | Description |
 |---|---|
-| `cgm_download` | Stream single image download |
+| `cgm_download` | Stream single image download (attachment). `&inline=1` = HTML wrapper page showing the original + save hint (used on iOS); `&raw=1` = the original served inline with its real image Content-Type (the wrapper's `<img>`) |
 | `cgm_download_all` | Stream ZIP download |
 | `cgm_sync_gallery` | Sync images from server folder |
 | `cgm_build_zip` | Build or rebuild download ZIP |
@@ -167,13 +171,14 @@ galleries. It's now split out per Allen's ask:
 ---
 
 ## Gutenberg Block (`client-gallery/index`)
+- **Deploy gotcha (2026-10-06):** auto mode's classifier blocks scp-to-live as "Production Deploy" — deploys need Allen to switch to manual approval first. Also, comparing live vs local via PowerShell `Out-File` hashes gives a false mismatch (re-encodes); diff from Git Bash with `tr -d '\r'` instead.
 - **Attributes:** `posts_per_page`, `orderBy`, `order`, `minWidth`, `gap`, `category`, `tileBg`
 - `category` — `gallery_category` term ID; 0 = all; renders `tax_query` in WP_Query
 - `tileBg` — hex colour string; sets `--cgm-tile-bg` CSS var inline; shown as `ColorPalette` in Layout panel using TT5 theme colours via `withSelect`
 - `gap` — sets `--cgm-gap` inline (overrides theme block-gap)
 - `minWidth` — sets `--cgm-min-width` inline for index grid `auto-fit` columns
 - JS uses `withSelect` HOC to inject both `galleryCategories` (REST) and `themeColors` (editor settings)
-- Shows cover images; password-protected galleries show a placeholder
+- Tile image priority (deployed live 2026-10-06 via scp + `php -l`, verified by curl on /client-gallery/; backup of previous file at `/tmp/class-gallery-blocks.php.bak-20261006` on funheim; not committed to git yet): **WP Featured Image** (`medium_large`) → plugin cover radio (`_cgm_cover_image`, via `cgm_cover_thumb`) → first file's thumb. Before this the index ignored Featured Images entirely, even though most galleries had one set (og:image already used them).
 
 ---
 
@@ -189,6 +194,8 @@ galleries. It's now split out per Allen's ask:
 ## Lightbox
 - Keyboard: ESC closes, ArrowLeft/ArrowRight navigates
 - Touch swipe left/right to navigate (passive listeners, 50px threshold)
+- **iOS downloads:** JS detects iOS (any browser) and appends `&inline=1` to single-image download URLs + drops the anchor's `download` attr, so Download opens a page with the full original for long-press > Save to Photos (see "iOS single-image download" section below)
+- **Long-press notice:** hold/right-click on a grid or lightbox image shows a toast pointing at the Download button; transparent `::after` shield over the lightbox image (see "Long-press notice" section)
 - **Carousel animation:** fade + 60px translate, 0.2s, driven by CSS keyframes in `lightbox.css`
   - `showImageForIndex(index, direction)` — `direction` is `'next'`/`'prev'`; omit for instant (first open)
   - `applyImageForIndex(index)` — pure src + download-button update, no animation
@@ -267,23 +274,85 @@ Events fire through the page's own `gtag()` (Site Kit loads it site-wide), dataL
 fallback for GTM — same no-hardcoded-ID pattern as the Forminator bridge:
 - `gallery_image_view` — every image shown full-size in the lightbox. One
   MutationObserver on the lightbox `<img>` src catches open + arrows + keyboard +
-  swipe uniformly.
+  swipe uniformly. Carries `image_index` + `total_images` (from `data-cgm-total` on
+  the grid div) so view-depth is queryable ("looked at 45 of 228").
 - `gallery_image_download` / `gallery_zip_download` — download clicks, split by URL.
-  Locked-state clicks (href="#", password modal) are ignored; the post-unlock click
-  is the one counted.
+- `gallery_unlock` / `gallery_unlock_failed` (`unlock_scope: view|download`) — did
+  clients actually get in. View outcome detected via a sessionStorage flag across
+  the POST reload (grid rendered = success, form again = wrong password). Download
+  unlock fires at submit time with beacon transport (success 302s straight into the
+  file attachment, no reload to hook) and also credits the intended download event
+  with `via_unlock: 1`; a wrong password re-renders with the error attribute →
+  `gallery_unlock_failed`, netting out the optimistic submit-time count.
+- `gallery_share` (`share_method: native|copy_link|facebook`).
 - All events carry `gallery_slug` + `gallery_id` (via `wp_localize_script`).
 - Outbound share URLs were ALREADY UTM-tagged (`utm_campaign=gallery_share`,
   `utm_content={slug}`) — that existed before this.
-- **Verified deployed** (script + settings in live HTML, via Autoptimize bundles) but
+- **Verified deployed** (script + settings + data-cgm-total in live HTML) but
   **live event flow not yet verified** — needs a real browser visit; check GA4
   Realtime (`run_realtime_report` on eventName) while someone browses a gallery.
   To make these show as metrics in standard reports later, register `gallery_slug`
-  as a custom dimension in GA4 Admin (not done — events collect fine without it).
+  (and optionally `image_index`/`total_images`) as custom dimensions in GA4 Admin
+  (not done — events collect fine without it).
+
+## Fixed: year-long cover-thumb cache could get stuck broken (0.3.2, 2026-08-08)
+
+**Symptom:** Allen spotted broken image icons for some galleries' cover thumbs on the `event-photography` client-gallery index block on mobile (Proptech, Tommy's Going Away), while others (Girl Bar Vol.2) rendered fine.
+
+**Root cause:** `class-gallery-download.php`'s `handle_thumb()` and `handle_cover_thumb()` both sent `Cache-Control: public, max-age=31536000` (1 year) with no ETag/Last-Modified validator. Confirmed via curl that the live endpoint was already serving valid, correctly-sized `image/webp` bytes for the "broken" galleries - the server-side data was fine. Cloudflare wasn't caching it either (`cf-cache-status: DYNAMIC`). The only place a bad result could be stuck was the visitor's own browser: if a phone ever loaded a given `gallery_id`'s cover before its thumbnail existed (or during any earlier broken window - the thumbnail generation pipeline moved to the async `cgm-thumbd` service in 0.3.0, so a first-page-load race was plausible), the browser had zero way to know that URL now returns something different for up to a year.
+
+**Fix:** both cache headers reduced to `max-age=86400` (1 day) - matches the cache lifetime `CGM_Gallery_Storage` already uses for its own public-thumb case, not a new pattern. Deployed live via SCP + `php -l` syntax check, verified via curl (`Cache-Control: public, max-age=86400` now on the live response). **Not committed to git yet** - working tree has this plus the still-pending 0.3.0 commits noted below.
+
+**If this recurs:** ask whoever's seeing it to try an incognito/private tab or clear site data for parfocalmedia.ca first - that isolates "stale browser cache" from "actually broken on the server" in about 10 seconds, before spending time on server-side diagnosis.
+
+## Download password re-prompts after a correct password (diagnosed 2026-10-16, fix STAGED, not deployed)
+**Symptom (Allen watched a client):** after entering the correct download password, the modal stays open and every Download click asks again. On Android the file does download, so the unlock worked, but there's no confirmation.
+**Root cause:**
+- On success, `handle_download_password_submission()` 302'd straight to the file URL.
+- A navigation that ends in `Content-Disposition: attachment` never replaces the current document, so the page stayed as rendered: modal open, field filled.
+- `cgmPasswordSettings.downloadUnlocked` / `data-cgm-download-unlocked` stayed `0` until a manual reload, so `password-modal.js` kept intercepting clicks even though the unlock cookie was set.
+
+**Fix:**
+- PHP redirects back to the gallery permalink instead, with `cgm_grant_dl` (plus `cgm_grant` if a view grant is active) and `cgm_dl_next=<validated intended URL>`.
+- The template adds `data-cgm-start-download` (re-validated, plus the download grant) when unlocked.
+- JS shows a `.cgm-toast` saying "Downloads unlocked. Your download is starting…", strips `cgm_dl_next` via `replaceState`, then navigates to the file.
+- `password-modal.js` enqueue bumped 0.1.4 → 0.1.5.
+- Analytics unchanged: the unlock is still tracked at submit, and the auto-start is a navigation, not a click, so it isn't double-counted.
+
+**Status:**
+- Local repo edited: `client-gallery.php`, `class-gallery-access.php`, `password-modal.js`, and an analytics comment.
+- **Local can NOT be scp'd as-is.** Live vs local differs far beyond this fix: undeployed hidden-gallery work, different asset versions, 177-line diff in `class-gallery-access.php`.
+- A live-only patch (applied to fresh copies of the live files, `php -l` + `node --check` clean) is saved at `patches/2026-10-16-download-unlock-live.diff`. That's 148 lines over `client-gallery.php`, `class-gallery-access.php` and `password-modal.js`. Re-pull live and re-check it applies before using it.
+- 2026-10-16 progress:
+  - Local branch `live-snapshot-2026-10-16` (commit `5f2d98d`, made in a worktree) = exact tar copy of the live plugin dir. It shows CLAUDE.md and `server/` as deleted because live doesn't carry them.
+  - Committing local work to `download-unlock-fix` and pushing either branch to GitHub were **blocked by the auto-mode classifier ("Out-of-Place Publication")**. Git commit/push in this repo needs manual approval mode, same as deploys.
+  - The patch doesn't touch password hashes, meta, cookies or `try_unlock_*` (grep-verified), so existing download passwords and unlock cookies stay valid.
+- Deploy needs manual approval mode. Back up the live files to `/tmp/*.bak-YYYYMMDD` first.
+- Test plan: correct password on desktop, Android, iOS, and FB/IG in-app browser; wrong password; Download all; refresh after the download.
+
+## Fixed: iOS single-image download went to Files, not Photos (2026-09-23)
+
+**Symptom:** on iPhone/iPad the lightbox Download button saved the photo to Files > Downloads instead of Photos; Android was fine.
+**Root cause:** `handle_download()` sends `application/octet-stream` + `Content-Disposition: attachment`; iOS Safari treats that as a generic file and never offers Photos.
+**Fix:** `gallery-lightbox.js` (script version 0.1.7) - iOS-only click handler fetches the original and calls `navigator.share({files})` so the share sheet offers "Save Image". Any failure/unsupported case falls back to the old plain download; Android/desktop never run it. PHP endpoint untouched. Deployed live 2026-09-23 (JS uploaded + live `client-gallery.php` line 78 bumped 0.1.6 -> 0.1.7 by `sed`; local PHP was NOT uploaded because it differs from live beyond that line - reconcile before the next full deploy).
+**Status:** the share-sheet approach above was **superseded the same day (0.1.8)**: Chrome iOS / Meta webviews don't reliably support file sharing, and Apple has no "download straight to Photos" at all - only long-press on an inline image or the share sheet. Also learned: the lightbox shows the watermarked WebP *thumb*, so long-pressing it saves the thumb, not the original. Current design: on iOS the JS appends `&inline=1` to the single-image download URL (and drops the anchor's `download` attr, which forces Files); `handle_download()` then serves a small HTML page with the full original as `<img src=...&raw=1>` (`Content-Type: image/jpeg`, `Content-Disposition: inline`) and a "Press and hold the photo, then tap Save to Photos" hint. Works for locked galleries too (post-password redirect keeps the query string + grant). ZIP unchanged (can't go to Photos). Deployed live 2026-09-23 (download PHP + lightbox JS + live line 78 version -> 0.1.8; backup of previous download PHP at `/tmp/class-gallery-download.php.bak-20260923` on funheim). **Not yet verified on a real iPhone.**
+
+## Long-press notice (2026-09-23, script 0.1.9 / lightbox.css 0.1.18)
+Allen doesn't want people saving the watermarked thumbs via long-press. `gallery-lightbox.js` shows a `.cgm-toast` ("To save this photo, use the Download button.") after a 450ms hold (touch, cancelled by >10px move) on `.cgm-grid` / `.cgm-lightbox-image-wrap`, and on `contextmenu` (right-click / Android long-press, still `preventDefault`ed). `lightbox.css` adds a transparent `::after` shield over the lightbox image wrap so iOS long-press hits a div, not the `<img>`, plus `-webkit-touch-callout:none` on `.cgm-lightbox-trigger`. Can't be made airtight (screenshots, browsers ignoring the callout flag) - the original stays behind the Download button. Deployed live; previous CSS backed up at `/tmp/lightbox.css.bak-20260923` on funheim. **Not yet verified on a real iPhone.**
+**Deploy gotcha:** `ssh myserver "...\"...\""` with nested double quotes from PowerShell hangs (remote shell waits on an unterminated quote) - use a single-quoted PS string and avoid quotes on the remote side (e.g. `sed -i -e 64s/a/b/ file`).
+
+## iOS tip under the top buttons (2026-09-24, deployed live)
+`client-gallery.php`, just before `.cgm-gallery-header` closes: a `<p class="cgm-ios-tip" hidden>` ("On iPhone or iPad? Tap a photo, then tap "Download image". Press and hold the photo that opens and tap "Save to Photos". Any trouble, message me on [Instagram](https://www.instagram.com/parfocalmedia/) or use the [contact form](home_url('/contact/')).") plus a tiny inline script that unhides it using the same iOS test as `gallery-lightbox.js`. It points at the per-photo button, not the ZIP, because a ZIP on iOS lands in Files. Allen chose the fallback contact routes: Instagram plus the contact page, no email or phone. The site's optimizer rewrites the inline script as a deferred `data:` script, which is fine because it still runs after parse.
+**Deploy:** patched a copy of the *live* file (live PHP still differs from local beyond this, so never upload the local one) and wrote it in place after `php -l`. The same edit is in the local repo copy. Backup: `/tmp/client-gallery.php.bak-20260924` on funheim. Verified: gallery page returns 200, `cgm-ios-tip` is in the live HTML, and debug.log has no new errors. **Not yet seen on a real iPhone.** The first deploy attempt was blocked by Claude Code's auto-mode production-deploy guard, and went through once Allen approved it explicitly in chat.
 
 ## Pending / Future
+- ⏳ Real-iPhone verification of the 0.1.8 inline "Save to Photos" flow, on open **and** password-protected galleries. (An older line here said locked galleries still land in Files. The 0.1.8 section above says the post-password redirect keeps `&inline=1`, so they should work too. That's unverified, not confirmed.)
 - ⏳ Zero-padded Lightroom filenames for correct `scandir()` sort order
 - ⏳ Theme colour picker for tile bg not pulling child-theme palette correctly (investigate `withSelect` + `core/block-editor` store timing)
 - ⏳ Watch GSC over the next 2-4 weeks: image sitemap processing status + whether gallery pages start earning Google Images impressions (compare against the ~zero baseline above)
+- ⏳ Real-device test of the Meta in-app-browser fix (URL grants) — the curl simulation is faithful (zero cookies) but not yet confirmed on an actual Instagram/Facebook in-app browser; do a real share-link → password → view pass next time Allen shares a client gallery
+- ⏳ Verify GA4 gallery events fire in practice, not just in the deployed HTML — `gallery_image_view`/`_download`, `gallery_zip_download`, `gallery_unlock`/`_failed`, `gallery_share` are all deployed and confirmed present in the live page's script/localize data, but the actual event flow needs a real browser visit (check `run_realtime_report` on eventName while someone browses a gallery). Optionally register `gallery_slug` (+ `image_index`/`total_images`) as GA4 custom dimensions for nicer reports.
+- ⏳ Repo has commits ahead of GitHub (`1f3dab2`, `96b17b5`, `24718e4`, `bbc5fdb`) — push whenever Allen wants it on the remote
 
 ---
 
@@ -294,3 +363,32 @@ fallback for GTM — same no-hardcoded-ID pattern as the Forminator bridge:
 - All action/filter hooks prefixed `cgm_`
 - No external PHP dependencies — pure WP core
 - No build tools — edit CSS/JS directly
+
+## Hidden (link-only) galleries (2026-10-05, built locally, NOT deployed)
+Allen's request: a client wants a super-private delivery; gallery must not appear anywhere, only via the exact link + password. Checkbox "Hidden (link only)" in the Gallery Access metabox, meta `_cgm_hidden = '1'`. All logic lives in `includes/` (live and local `includes/*.php` were md5-identical on 2026-10-05; only `client-gallery.php` differs - so these two files can be uploaded as-is, the main file must not be).
+- `CGM_Gallery_Access::gallery_is_private()` now also returns true for hidden -> existing noindex, plugin sitemap skip, OG-tag skip, `Cache-Control: private, no-store` on thumbs all apply automatically.
+- `pre_get_posts`: hidden galleries dropped from every non-singular `client_gallery` query on front end + REST (index block, `/feed/?post_type=client_gallery`, REST collection). wp-admin lists and editors-in-REST unaffected. Bypass arg `cgm_include_hidden`.
+- `rest_prepare_client_gallery`: 404 on `/wp-json/wp/v2/client_gallery/<id>` for non-editors.
+- `template_redirect` prio 1: 404 when a hidden gallery is reached by `?p=<id>` (otherwise `redirect_canonical` would 301 to the pretty URL and leak the slug - IDs are sequential).
+- Yoast: `wpseo_exclude_from_sitemap_by_post_ids` (Yoast's `client_gallery-sitemap.xml` listed all 19 galleries incl. protected ones), `wpseo_opengraph_image`/`wpseo_twitter_image` stripped.
+- `handle_cover_thumb` (`class-gallery-download.php`): 404 for hidden galleries unless `edit_post`.
+- **Leaks found live before this (2026-10-05):** REST listed all 19 galleries unauthenticated; RSS feed listed 10; Yoast sitemap listed 19; cover endpoint had no access check.
+- **Usage caveats:** don't set a WP *featured image* on a hidden gallery (Yoast's schema JSON-LD can still reference it - not filtered); use a non-guessable slug; always pair with a viewing password (hidden alone is security-by-obscurity).
+- **Unverified until deployed + tested:** whether returning `''` from `wpseo_opengraph_image` fully suppresses the tag in this Yoast version; whether Yoast's robots output honours our `wp_robots` noindex. Test plan: tick Hidden on a throwaway gallery, then curl REST list/single, feed, Yoast sitemap, `?p=<id>`, cover endpoint, and the page head (`og:image`, `robots`).
+- Deploy: blocked by Claude Code's auto-mode production-deploy guard 2026-10-05, awaiting Allen's explicit OK. Backup pattern: `/tmp/<file>.bak-20261005` on funheim.
+- Not committed to git - `class-gallery-download.php` also carries older uncommitted edits, commit deliberately.
+
+## Access audit of protected galleries (2026-10-05)
+Allen asked whether password galleries had been downloaded nefariously. Source: funheim nginx `/var/log/nginx/access.log*` (shared by all sites, logrotate `daily`/`rotate 14` -> **only 2026-09-21..10-05 exists**). Protected set from WP: view-password = 2392 ten-oaks-bowlathon, 2393 ten-oaks-camp, 2408 burlesque-selection; download-password hash present on 16 (2366 2392 2393 2396 2397 2408 2410 2412 2579 2589 2593 2776 2778 2785 2788 2789).
+- **No successful download of any protected gallery.** All hits on protected IDs were 403 (2366 ZIP x2, 2396 x1, 2397 x4 - Chinese cloud-range scrapers). Every 200 download was on public galleries 2391 drag-brunch, 2782, 2950 (2391 heavily scraped by Tencent/Huawei-cloud IPs - allowed by design, it's public).
+- **View-protected galleries: 0 photo thumbs served**; 14 hits were all `cgm_cover_thumb` (the known public-cover leak, one image each).
+- **0 password POSTs** to any gallery in the window -> no brute-forcing seen (also no legit unlocks).
+- Endpoint mix over 15 days: 44,228 `cgm_thumb`, 161 `cgm_cover_thumb`, 100 `cgm_download`, 17 `cgm_download_all`.
+- GA4 (`gallery_unlock`/`_failed`, download events) would extend history past 15 days but the GA4 MCP hit the known `invalid_grant` expiry - re-login per [[dev/seo-tools/CLAUDE|dev/seo-tools]].
+- Re-run: `sudo zcat -f /var/log/nginx/access.log* | grep cgm_download` on funheim, split by `gallery_id` + status.
+- **Gotcha running multi-line audit scripts:** piping a local script via PowerShell `Get-Content | ssh myserver 'bash -s'` fails (UTF-8 BOM -> `﻿sudo: command not found`, plus CRLF). Git-Bash `ssh` has no key (permission denied). Working pattern: read file, strip `\r`, base64 it, `ssh myserver "echo $b64 | base64 -d | bash"` from PowerShell.
+
+### Electromate 40th (gallery 2953) download check (2026-10-08)
+Triggered by an unverified download request from a personal-Gmail "newsletter editor" (Allen is holding the password pending OK from client contact Jennifer). Logs cover 03-08 Oct.
+- **All full-res downloads:** 06 Oct, `142.112.201.92` = Allen's own public IP (verified via ipify): 2 ZIP parts (160 MB + 95 MB) + 2 single images. 07 Oct, `2600:100d:a0f0:...` (mobile IPv6, Firefox/Windows): 2 POST 302s on the gallery page, then **one image (8.4 MB) downloaded twice**. Nothing else.
+- **Viewing:** ~20 distinct Canadian residential/corporate IPs each loaded the full ~179 thumbs on 07 Oct, plus Microsoft-range hits (`72.152/72.153/74.179/135.232.*` loading 24 thumbs each, `2a01:111:*` HEADs): looks like Outlook/Safe Links scanning. Consistent with the link being emailed around inside an M365 org that day. Also ~100 OVH-Canada IPs pulling 1 thumb each = a crawler.

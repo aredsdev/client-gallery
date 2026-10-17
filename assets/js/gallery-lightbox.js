@@ -11,6 +11,23 @@ document.addEventListener('DOMContentLoaded', function () {
     const triggers = Array.from(document.querySelectorAll('.cgm-lightbox-trigger'));
     if (!triggers.length) return;
 
+    // iOS (Safari, Chrome, Meta in-app): an attachment download always lands in the
+    // Files app. Photos is only offered for a real image shown inline, so on iOS the
+    // single-image download URL opens a page with the photo + "press and hold" hint.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    if (isIOS && downloadEl) {
+        downloadEl.removeAttribute('download'); // Safari would force a save to Files
+    }
+
+    function forPlatform(url) {
+        if (isIOS && url && /action=cgm_download(?!_all)/.test(url) && url.indexOf('inline=1') === -1) {
+            return url + '&inline=1';
+        }
+        return url;
+    }
+
     let currentIndex = -1;
     let isAnimating  = false;
 
@@ -68,6 +85,8 @@ document.addEventListener('DOMContentLoaded', function () {
         const modal      = document.getElementById('cgm-download-password-modal');
         const requiresPw = modal && modal.dataset.cgmRequiresPassword === '1';
         const unlocked   = modal && modal.dataset.cgmDownloadUnlocked === '1';
+
+        downloadUrl = forPlatform(downloadUrl);
 
         if (downloadUrl) {
             if (requiresPw && !unlocked) {
@@ -262,9 +281,66 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 
-// Soft-block context menu on gallery + lightbox images
-document.addEventListener('contextmenu', function (e) {
-    if (e.target.closest('.cgm-grid, .cgm-lightbox-image-wrap')) {
-        e.preventDefault();
+// Long-press / right-click on a gallery image: block the native save menu and
+// point people at the Download button instead (that serves the original file;
+// what's on screen is only the watermarked preview).
+(function () {
+    var HOLD_MS = 450;
+    var MOVE_PX = 10;
+    var SELECTOR = '.cgm-grid, .cgm-lightbox-image-wrap';
+    var timer = null;
+    var startX = 0;
+    var startY = 0;
+    var toastEl = null;
+    var toastTimer = null;
+
+    function showToast() {
+        if (!toastEl) {
+            toastEl = document.createElement('div');
+            toastEl.className = 'cgm-toast';
+            toastEl.setAttribute('role', 'status');
+            toastEl.textContent = 'To save this photo, use the Download button.';
+            document.body.appendChild(toastEl);
+        }
+        // Restart the fade if it's already showing.
+        toastEl.classList.remove('is-visible');
+        void toastEl.offsetWidth;
+        toastEl.classList.add('is-visible');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () {
+            toastEl.classList.remove('is-visible');
+        }, 3000);
     }
-});
+
+    function cancel() {
+        clearTimeout(timer);
+        timer = null;
+    }
+
+    document.addEventListener('touchstart', function (e) {
+        cancel();
+        if (e.touches.length !== 1 || !e.target.closest || !e.target.closest(SELECTOR)) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        timer = setTimeout(showToast, HOLD_MS);
+    }, { passive: true });
+
+    document.addEventListener('touchmove', function (e) {
+        if (!timer) return;
+        var t = e.touches[0];
+        if (Math.abs(t.clientX - startX) > MOVE_PX || Math.abs(t.clientY - startY) > MOVE_PX) {
+            cancel();
+        }
+    }, { passive: true });
+
+    document.addEventListener('touchend', cancel, { passive: true });
+    document.addEventListener('touchcancel', cancel, { passive: true });
+
+    // Android Chrome / desktop fire contextmenu on long-press / right-click.
+    document.addEventListener('contextmenu', function (e) {
+        if (e.target.closest && e.target.closest(SELECTOR)) {
+            e.preventDefault();
+            showToast();
+        }
+    });
+})();
