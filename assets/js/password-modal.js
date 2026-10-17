@@ -11,10 +11,21 @@
         var galleryId     = modal.dataset.cgmGalleryId || '';
         var STORAGE_KEY   = 'cgmPendingDownload';
 
+        // The modal gets its own history entry, so the phone/browser Back
+        // button closes it instead of leaving the gallery.
+        var historyPushed = false;
+
         function openModal() {
             modal.removeAttribute('hidden');
             modal.classList.add('is-visible');
             document.body.classList.add('cgm-password-modal-open');
+
+            if (!historyPushed) {
+                try {
+                    history.pushState({ cgmPasswordModal: 1 }, '');
+                    historyPushed = true;
+                } catch (e) {}
+            }
 
             if (passwordField) {
                 setTimeout(function () {
@@ -24,7 +35,7 @@
             }
         }
 
-        function closeModal() {
+        function hideModal() {
             modal.classList.remove('is-visible');
             document.body.classList.remove('cgm-password-modal-open');
             modal.setAttribute('hidden', 'hidden');
@@ -34,6 +45,24 @@
                 sessionStorage.removeItem(STORAGE_KEY);
             } catch (e) {}
         }
+
+        // Closed by X / Esc / outside click: also drop the modal's history
+        // entry, so Back afterwards behaves normally.
+        function closeModal() {
+            hideModal();
+            if (historyPushed) {
+                historyPushed = false;
+                history.back();
+            }
+        }
+
+        // Back button while open: the entry is already popped, just hide.
+        window.addEventListener('popstate', function () {
+            if (historyPushed) {
+                historyPushed = false;
+                hideModal();
+            }
+        });
 
         function getPasswordState() {
             var settings = window.cgmPasswordSettings || {};

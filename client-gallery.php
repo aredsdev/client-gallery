@@ -83,7 +83,7 @@ function cgm_register_assets() {
         'cgm-password-modal-js',
         CGM_PLUGIN_URL . 'assets/js/password-modal.js',
         [],
-        '0.1.4',
+        '0.1.6',
         true
     );
 
