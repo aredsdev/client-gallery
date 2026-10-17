@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Client Gallery Manager
  * Description: Private client galleries stored outside the Media Library with thumbnails and secure downloads.
- * Version: 0.3.1
+ * Version: 0.3.2
  * Author: Allen Redshaw
  */
 
@@ -61,7 +61,7 @@ function cgm_register_assets() {
         'cgm-lightbox-css',
         CGM_PLUGIN_URL . 'assets/css/lightbox.css',
         [],
-        '0.1.17'
+        '0.1.18'
     );
 
     wp_register_style(
@@ -75,7 +75,7 @@ function cgm_register_assets() {
         'cgm-gallery-lightbox',
         CGM_PLUGIN_URL . 'assets/js/gallery-lightbox.js',
         [],
-        '0.1.6',
+        '0.1.9',
         true
     );
 
@@ -350,6 +350,26 @@ function cgm_render_client_gallery_content( $content ) {
 
 
             </div>
+
+            <!-- iOS only: Photos is only reachable via the per-photo Download button -->
+            <p class="cgm-ios-tip" hidden style="margin:0;font-size:.95rem;line-height:1.45;opacity:.85">
+                <strong><?php esc_html_e( 'On iPhone or iPad?', 'client-gallery' ); ?></strong>
+                <?php esc_html_e( 'Tap a photo, then tap "Download image". Press and hold the photo that opens and tap "Save to Photos".', 'client-gallery' ); ?>
+                <?php esc_html_e( 'Any trouble, message me on', 'client-gallery' ); ?>
+                <a href="https://www.instagram.com/parfocalmedia/" target="_blank" rel="noopener noreferrer">Instagram</a>
+                <?php esc_html_e( 'or use the', 'client-gallery' ); ?>
+                <a href="<?php echo esc_url( home_url( '/contact/' ) ); ?>"><?php esc_html_e( 'contact form', 'client-gallery' ); ?></a>.
+            </p>
+            <script>
+            (function () {
+                var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                if (isIOS) {
+                    var tips = document.querySelectorAll('.cgm-ios-tip');
+                    for (var i = 0; i < tips.length; i++) { tips[i].hidden = false; }
+                }
+            })();
+            </script>
         </div>
 
 
